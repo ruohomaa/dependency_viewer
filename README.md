@@ -27,9 +27,9 @@ A tool to visualize Salesforce Metadata Dependencies using a local SQLite databa
 Fetch the dependency graph from Salesforce.
 
 ```bash
-node dist/index.js sync -u <username> -p <password> [-l <loginUrl>]
+node dist/index.js sync -o <target-org-alias>
 ```
-*Note: If your password requires a security token, append it to the password.*
+*Note: Requires `sf` CLI to be installed and authenticated to the target org.*
 
 ### 2. View Dependencies
 

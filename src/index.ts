@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import { Command } from 'commander';
-import { login, fetchDependencies } from './salesforce';
-import { initDb, clearDependencies, insertDependencies } from './db';
+import { fetchDependencies, fetchAllMetadata } from './salesforce';
+import { initDb, clearDependencies, insertDependencies, insertComponents } from './db';
 import { startServer } from './server';
 
 const program = new Command();
+
 
 program
   .name('dep-viewer')
@@ -19,24 +20,33 @@ program.on('option:db', (dbPath) => {
 
 program.command('sync')
   .description('Download metadata dependencies from Salesforce')
-  .requiredOption('-u, --username <username>', 'Salesforce username')
-  .requiredOption('-p, --password <password>', 'Salesforce password (security token appended if needed)')
-  .option('-l, --loginUrl <loginUrl>', 'Login URL', 'https://login.salesforce.com')
+  .requiredOption('-o, --target-org <org>', 'Target Salesforce Org (username or alias)')
   .action(async (options) => {
     try {
-      console.log('Connecting to Salesforce...');
-      const conn = await login(options.username, options.password, options.loginUrl);
-      console.log('Connected. Fetching dependencies...');
+      console.log(`\n=== Starting Sync for org: ${options.targetOrg} ===`);
       
-      const records = await fetchDependencies(conn);
-      console.log(`Fetched ${records.length} dependency records.`);
-      
-      console.log('Saving to database...');
       initDb();
       clearDependencies();
+
+      // fetchDependencies handles its own detailed logging
+      const records = await fetchDependencies(options.targetOrg);
       
+      console.log('      Saving dependencies to database...');
       insertDependencies(records);
-      console.log(`\nDone! Saved ${records.length} records.`);
+      
+      // fetchAllMetadata handles its own detailed logging
+      const allMeta = await fetchAllMetadata(options.targetOrg);
+      
+      const componentRecords = allMeta.map((m: any) => ({
+          id: m.id || m.fileName, // fallback for components without ID
+          name: m.fullName,
+          type: m.type
+      })).filter((c: any) => c.id); // Must have ID/Key
+      
+      console.log(`      Saving ${componentRecords.length} additional components...`);
+      insertComponents(componentRecords);
+
+      console.log(`\nDone! Sync complete.`);
     } catch (err: any) {
       console.error('Error:', err.message);
       process.exit(1);
