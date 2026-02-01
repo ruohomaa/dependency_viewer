@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Get the directory of the script
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Check if dist/index.js exists
+if [ ! -f "$DIR/dist/index.js" ]; then
+    echo "Distribution not found. Building project..."
+    npm run build
+fi
+
+# Open browser if serving
+if [ "$1" = "serve" ]; then
+    (sleep 2 && open "http://localhost:3000") &
+fi
+
+# Run the CLI
+node "$DIR/dist/index.js" "$@"

@@ -27,16 +27,27 @@ A tool to visualize Salesforce Metadata Dependencies using a local SQLite databa
 Fetch the dependency graph from Salesforce.
 
 ```bash
-node dist/index.js sync -o <target-org-alias>
+./dep-viewer sync -o <target-org-alias>
 ```
+
+To clear the database before syncing (fresh start):
+```bash
+./dep-viewer sync -o <target-org-alias> --clean
+```
+
 *Note: Requires `sf` CLI to be installed and authenticated to the target org.*
+
+To just delete the database:
+```bash
+./dep-viewer clean
+```
 
 ### 2. View Dependencies
 
 Start the local web server to view the graph.
 
 ```bash
-npm start
+./dep-viewer serve
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.

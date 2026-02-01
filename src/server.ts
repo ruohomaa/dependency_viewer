@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
+import open from 'open';
 import { getAllDependencies, initDb } from './db';
 
 export function startServer(port: number) {
@@ -30,6 +31,9 @@ export function startServer(port: number) {
   });
 
   app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    const url = `http://localhost:${port}`;
+    console.log(`Server running at ${url}`);
+    console.log('Opening browser...');
+    open(url);
   });
 }
