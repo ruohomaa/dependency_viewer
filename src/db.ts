@@ -17,9 +17,15 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS metadata_components (
       id TEXT PRIMARY KEY,
       name TEXT,
-      type TEXT
+      type TEXT,
+      size INTEGER,
+      coverage INTEGER
     )
   `);
+
+  // Migration for existing tables
+  try { db.exec('ALTER TABLE metadata_components ADD COLUMN size INTEGER'); } catch (e) {}
+  try { db.exec('ALTER TABLE metadata_components ADD COLUMN coverage INTEGER'); } catch (e) {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS metadata_dependencies (
@@ -45,6 +51,28 @@ export function insertComponents(components: { id: string, name: string, type: s
   });
 
   insertMany(components);
+}
+
+export function updateComponentStats(stats: { id: string, size?: number, coverage?: number }[]) {
+  const stmt = getDb().prepare(`
+    UPDATE metadata_components 
+    SET size = COALESCE(@size, size), coverage = COALESCE(@coverage, coverage)
+    WHERE id = @id
+  `);
+
+  const updateMany = getDb().transaction((items) => {
+    for (const item of items) {
+      if (item.id) {
+          stmt.run({
+              id: item.id,
+              size: item.size ?? null,
+              coverage: item.coverage ?? null
+          });
+      }
+    }
+  });
+
+  updateMany(stats);
 }
 
 export function insertDependencyEdges(edges: { sourceId: string, targetId: string }[]) {
@@ -104,9 +132,13 @@ export function getAllDependencies() {
       s.id as metadataComponentId,
       s.name as metadataComponentName,
       s.type as metadataComponentType,
+      s.size as metadataComponentSize,
+      s.coverage as metadataComponentCoverage,
       t.id as refMetadataComponentId,
       t.name as refMetadataComponentName,
-      t.type as refMetadataComponentType
+      t.type as refMetadataComponentType,
+      t.size as refMetadataComponentSize,
+      t.coverage as refMetadataComponentCoverage
     FROM metadata_dependencies d
     JOIN metadata_components s ON d.sourceId = s.id
     JOIN metadata_components t ON d.targetId = t.id

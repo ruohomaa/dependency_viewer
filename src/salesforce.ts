@@ -48,7 +48,7 @@ export async function listMetadata(targetOrg: string, type: string) {
 }
 
 export async function fetchAllMetadata(targetOrg: string) {
-    console.log(`\n[2/2] Fetching All Metadata Components...`);
+    console.log(`\n[1/2] Fetching All Metadata Components...`);
     // console.log('Describing metadata types (via sf org list metadata-types)...');
     const startTime = Date.now();
 
@@ -160,4 +160,62 @@ export async function fetchDependenciesForId(targetOrg: string, id: string) {
         throw new Error(`Salesforce API Error: ${result.message || 'Unknown error'}`);
     }
 }
+
+export async function fetchApexStats(targetOrg: string) {
+    console.log(`\n[2/2] Fetching Apex Code Coverage and Size Stats...`);
+    const startTime = Date.now();
+
+    async function query(soql: string) {
+        try {
+            const cmd = `sf data query --query "${soql}" --target-org "${targetOrg}" --use-tooling-api --json`;
+            const stdout = await runCommand(cmd);
+            const res = JSON.parse(stdout);
+            if (res.status === 0 && res.result) return res.result.records;
+        } catch (e: any) {
+            // console.warn('Query failed', soql, e.message);
+        }
+        return [];
+    }
+
+    // Parallel fetch
+    const [classes, triggers, coverage] = await Promise.all([
+        query('SELECT Id, LengthWithoutComments FROM ApexClass'),
+        query('SELECT Id, LengthWithoutComments FROM ApexTrigger'),
+        query('SELECT ApexClassOrTriggerId, NumLinesCovered, NumLinesUncovered FROM ApexCodeCoverageAggregate')
+    ]);
+
+    const statsMap = new Map<string, { id: string, size?: number, coverage?: number }>();
+
+    // Process Size
+    const processSize = (records: any[]) => {
+        for (const r of records) {
+            if (r.Id && r.LengthWithoutComments != null) {
+                statsMap.set(r.Id, { id: r.Id, size: r.LengthWithoutComments });
+            }
+        }
+    };
+    processSize(classes);
+    processSize(triggers);
+
+    // Process Coverage
+    for (const c of coverage) {
+        const id = c.ApexClassOrTriggerId;
+        if (!id) continue;
+        
+        const covered = c.NumLinesCovered || 0;
+        const uncovered = c.NumLinesUncovered || 0;
+        const total = covered + uncovered;
+        let pct = 0;
+        if (total > 0) pct = Math.round((covered / total) * 100);
+
+        const existing: { id: string, size?: number, coverage?: number } = statsMap.get(id) || { id };
+        existing.coverage = pct;
+        statsMap.set(id, existing);
+    }
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`      ✓ Fetched stats for ${statsMap.size} components in ${duration}s.`);
+    return Array.from(statsMap.values());
+}
+
 

@@ -2,8 +2,8 @@
 import 'dotenv/config';
 import fs from 'fs';
 import { Command } from 'commander';
-import { fetchDependencies, fetchAllMetadata } from './salesforce';
-import { initDb, clearDependencies, insertDependencies, insertComponents } from './db';
+import { fetchAllMetadata, fetchApexStats } from './salesforce';
+import { initDb, clearDependencies, insertComponents, updateComponentStats } from './db';
 import { startServer } from './server';
 
 const program = new Command();
@@ -57,13 +57,7 @@ program.command('sync')
         clearDependencies(); // Only needed if we didn't just delete the DB
       }
 
-      // fetchDependencies handles its own detailed logging
-      const records = await fetchDependencies(options.targetOrg);
-      
-      console.log('      Saving dependencies to database...');
-      insertDependencies(records);
-      
-      // fetchAllMetadata handles its own detailed logging
+      // 1. Fetch all metadata components (nodes)
       const allMeta = await fetchAllMetadata(options.targetOrg);
       
       const componentRecords = allMeta.map((m: any) => ({
@@ -72,8 +66,13 @@ program.command('sync')
           type: m.type
       })).filter((c: any) => c.id); // Must have ID/Key
       
-      console.log(`      Saving ${componentRecords.length} additional components...`);
+      console.log(`      Saving ${componentRecords.length} components...`);
       insertComponents(componentRecords);
+      
+      // 2. Fetch stats (size/coverage)
+      const stats = await fetchApexStats(options.targetOrg);
+      console.log(`      Saving stats for ${stats.length} components...`);
+      updateComponentStats(stats);
 
       console.log(`\nDone! Sync complete.`);
     } catch (err: any) {
