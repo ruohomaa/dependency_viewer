@@ -9,6 +9,15 @@ dagreGraph.setDefaultEdgeLabel(() => ({}));
 
 const nodeWidth = 350;
 
+const getColorForType = (type: string) => {
+  let hash = 0;
+  for (let i = 0; i < type.length; i++) {
+    hash = type.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash % 360);
+  return hue;
+};
+
 const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
   if (nodes.length === 0) return { nodes: [] };
 
@@ -119,6 +128,7 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
   const groupNodes: Node[] = [];
   Object.keys(groupDimensions).forEach(type => {
       const g = masterGraph.node(type);
+      const hue = getColorForType(type);
       groupNodes.push({
           id: type,
           data: { label: type },
@@ -129,12 +139,12 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
           style: { 
             width: groupDimensions[type].width, 
             height: groupDimensions[type].height,
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            border: '2px dashed #aaa',
+            backgroundColor: `hsla(${hue}, 70%, 90%, 0.3)`,
+            border: `2px dashed hsl(${hue}, 50%, 40%)`,
             borderRadius: '8px',
             fontSize: '20px',
             fontWeight: 'bold',
-            color: '#333',
+            color: `hsl(${hue}, 50%, 20%)`,
             // textTransform: 'uppercase', // Removed uppercase
             display: 'flex',
             justifyContent: 'flex-end', // Align to right
@@ -225,27 +235,37 @@ function App() {
     
     Promise.all(promises)
       .then(results => {
-         const newData = results.flat();
-         // Merge new data
+         const fetchedData = results.flat();
+
+         // Create stub records for selected items to ensure they appear even with no dependencies
+         const stubData = Array.from(selectedItems.values()).map(item => ({
+             id: `stub-${item.id}`,
+             metadataComponentId: item.id,
+             metadataComponentName: item.name, // Ensure this matches what search returns
+             metadataComponentType: item.type,
+             refMetadataComponentId: null,
+             refMetadataComponentName: null,
+             refMetadataComponentType: null
+         }));
+
+         const newData = [...stubData, ...fetchedData];
+
+         // 1. Update visible types to include types from the new data
+         setVisibleTypes(prevTypes => {
+             const nextTypes = new Set(prevTypes);
+             newData.forEach((d: any) => {
+                if (d.metadataComponentType) nextTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
+                if (d.refMetadataComponentType) nextTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
+             });
+             return nextTypes;
+         });
+
+         // 2. Update rawData, avoiding duplicates
          setRawData(prev => {
-             // Deduplicate by database ID (d.id)
              const existingIds = new Set(prev.map(p => p.id));
              const uniqueNewData = newData.filter((d: any) => !existingIds.has(d.id));
-             
-             // Update visible types
-             const newTypes = new Set(visibleTypes);
-             uniqueNewData.forEach((d: any) => {
-                if (d.metadataComponentType) newTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
-                if (d.refMetadataComponentType) newTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
-             });
-             setVisibleTypes(newTypes);
-
              return [...prev, ...uniqueNewData];
          });
-         // Keep search results and selection visible
-         // setSearchTerm('');
-         // setSearchResults([]);
-         // setSelectedItems(new Map());
       })
       .catch(err => console.error("Fetch failed", err))
       .finally(() => setIsLoading(false));
@@ -365,11 +385,11 @@ function App() {
                 />
                  <button 
                     onClick={handleFetchSelected} 
-                    disabled={selectedItems.size === 0}
+                    disabled={isLoading || selectedItems.size === 0}
                     style={{ 
                         padding: '8px 12px', 
-                        cursor: selectedItems.size > 0 ? 'pointer' : 'not-allowed',
-                        background: selectedItems.size > 0 ? '#007bff' : '#ccc',
+                        cursor: (isLoading || selectedItems.size === 0) ? 'not-allowed' : 'pointer',
+                        background: (isLoading || selectedItems.size === 0) ? '#ccc' : '#007bff',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',
@@ -456,6 +476,14 @@ function App() {
                 checked={visibleTypes.has(type)}
                 onChange={() => toggleType(type)}
               />
+               <span style={{ 
+                  display: 'inline-block', 
+                  width: '12px', 
+                  height: '12px', 
+                  backgroundColor: `hsl(${getColorForType(type)}, 60%, 60%)`,
+                  borderRadius: '2px',
+                  border: '1px solid rgba(0,0,0,0.1)'
+              }}></span>
               {type}
             </label>
           ))}

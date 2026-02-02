@@ -47,7 +47,7 @@ To just delete the database:
 Start the local web server to view the graph.
 
 ```bash
-./dep-viewer serve
+./dep-viewer serve -o <target-org-alias>
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
