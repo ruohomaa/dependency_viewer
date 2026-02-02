@@ -22,10 +22,6 @@ export function initDb() {
       coverage INTEGER
     )
   `);
-
-  // Migration for existing tables
-  try { db.exec('ALTER TABLE metadata_components ADD COLUMN size INTEGER'); } catch (e) {}
-  try { db.exec('ALTER TABLE metadata_components ADD COLUMN coverage INTEGER'); } catch (e) {}
 }
 
 export function insertComponents(components: { id: string, name: string, type: string }[]) {
