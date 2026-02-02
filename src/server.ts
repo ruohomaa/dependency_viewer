@@ -2,7 +2,7 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import open from 'open';
-import { getAllDependencies, getDependenciesForComponent, initDb, searchComponents, insertDependencies } from './db';
+import { getAllDependencies, getComponents, initDb, searchComponents } from './db';
 import { fetchDependenciesForId } from './salesforce';
 
 export function startServer(port: number, targetOrg?: string) {
@@ -39,14 +39,46 @@ export function startServer(port: number, targetOrg?: string) {
          try {
             console.log(`Fetching dependencies for ${id} from Salesforce...`);
             const records = await fetchDependenciesForId(targetOrg, id);
-            insertDependencies(records);
+            
+            // Map records to a format the UI expects, and augment with local component data if possible
+            // Since we don't store dependencies, we return the records directly in the expected format
+            // optionally resolving component names/stats from our local DB.
+            
+            const db = getComponents(); 
+            const compMap = new Map(db.map((c: any) => [c.id, c]));
+
+            const results = records.map((dep: any) => {
+                const s = compMap.get(dep.MetadataComponentId) || {};
+                const t = compMap.get(dep.RefMetadataComponentId) || {};
+
+                return {
+                    id: dep.Id || `${dep.MetadataComponentId}-${dep.RefMetadataComponentId}`,
+                    metadataComponentId: dep.MetadataComponentId,
+                    metadataComponentName: dep.MetadataComponentName,
+                    metadataComponentType: dep.MetadataComponentType,
+                    metadataComponentSize: s.size,
+                    metadataComponentCoverage: s.coverage,
+
+                    refMetadataComponentId: dep.RefMetadataComponentId,
+                    refMetadataComponentName: dep.RefMetadataComponentName || dep.RefMetadataComponentComponentName,
+                    refMetadataComponentType: dep.RefMetadataComponentType,
+                    refMetadataComponentSize: t.size,
+                    refMetadataComponentCoverage: t.coverage
+                };
+            });
+            
+            res.json(results);
+            return;
+
          } catch (e: any) {
             console.error('Error fetching from Salesforce:', e.message);
+            res.status(500).json({ error: e.message });
+            return;
          }
       }
       
-      const deps = getDependenciesForComponent(id);
-      res.json(deps);
+      // If no targetOrg, we can't really do anything since we don't store dependencies
+       res.json([]);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

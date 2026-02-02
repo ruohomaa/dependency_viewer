@@ -26,16 +26,6 @@ export function initDb() {
   // Migration for existing tables
   try { db.exec('ALTER TABLE metadata_components ADD COLUMN size INTEGER'); } catch (e) {}
   try { db.exec('ALTER TABLE metadata_components ADD COLUMN coverage INTEGER'); } catch (e) {}
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS metadata_dependencies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sourceId TEXT,
-      targetId TEXT,
-      FOREIGN KEY(sourceId) REFERENCES metadata_components(id),
-      FOREIGN KEY(targetId) REFERENCES metadata_components(id)
-    )
-  `);
 }
 
 export function insertComponents(components: { id: string, name: string, type: string }[]) {
@@ -76,6 +66,11 @@ export function updateComponentStats(stats: { id: string, size?: number, coverag
 }
 
 export function insertDependencyEdges(edges: { sourceId: string, targetId: string }[]) {
+  // We no longer store edges in the database locally, as they are fetched on demand.
+  // This function is kept to avoid breaking existing calls but does nothing persistent.
+  // If we wanted to, we could store them in an in-memory cache or a temporary table.
+  
+  /*
   const stmt = getDb().prepare(`
     INSERT INTO metadata_dependencies (sourceId, targetId)
     VALUES (@sourceId, @targetId)
@@ -88,13 +83,14 @@ export function insertDependencyEdges(edges: { sourceId: string, targetId: strin
   });
 
   insertMany(edges);
+  */
 }
 
 // Keep the old function for backward compatibility or simple bulk inserts, 
 // but implementing it via the new tables
 export function insertDependencies(deps: any[]) {
   const components = new Map<string, { id: string, name: string, type: string }>();
-  const edges: { sourceId: string, targetId: string }[] = [];
+  // const edges: { sourceId: string, targetId: string }[] = [];
 
   for (const dep of deps) {
     if (dep.MetadataComponentId) {
@@ -112,20 +108,26 @@ export function insertDependencies(deps: any[]) {
       });
     }
     
+    /*
     if (dep.MetadataComponentId && dep.RefMetadataComponentId) {
       edges.push({
         sourceId: dep.MetadataComponentId,
         targetId: dep.RefMetadataComponentId
       });
     }
+    */
   }
 
   insertComponents(Array.from(components.values()));
-  insertDependencyEdges(edges);
+  // insertDependencyEdges(edges);
 }
 
 export function getAllDependencies() {
-  // reconstruct the flat view
+  // This used to return all dependencies from the DB. 
+  // Now since we don't store them, it returns empty array or could throw
+  return [];
+  
+  /*
   const stmt = getDb().prepare(`
     SELECT 
       d.id as id,
@@ -144,6 +146,7 @@ export function getAllDependencies() {
     JOIN metadata_components t ON d.targetId = t.id
   `);
   return stmt.all();
+  */
 }
 
 export function getComponents() {
@@ -151,7 +154,7 @@ export function getComponents() {
 }
 
 export function clearDependencies() {
-  getDb().exec('DELETE FROM metadata_dependencies');
+  // getDb().exec('DELETE FROM metadata_dependencies');
   getDb().exec('DELETE FROM metadata_components');
 }
 
@@ -161,6 +164,14 @@ export function searchComponents(query: string) {
 }
 
 export function getDependenciesForComponent(id: string) {
+  // This is now purely used if we need to query what's currently loaded
+  // But if we are fetching on demand, likely the API will handle it differently
+  // or store in a transient table.
+  // For now returning empty if no table.
+  
+  return [];
+
+  /*
   const stmt = getDb().prepare(`
     SELECT 
       d.id as dependencyId,
@@ -176,5 +187,6 @@ export function getDependenciesForComponent(id: string) {
     WHERE d.sourceId = ? OR d.targetId = ?
   `);
   return stmt.all(id, id);
+  */
 }
 
