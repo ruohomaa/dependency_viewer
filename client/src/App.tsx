@@ -160,6 +160,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedItems, setSelectedItems] = useState<Map<string, any>>(new Map()); // Map<id, Item>
+  const [isLoading, setIsLoading] = useState(false);
 
   // Derive all unique types from raw data
   const allTypes = useMemo(() => {
@@ -205,6 +206,8 @@ function App() {
   const handleFetchSelected = () => {
     if (selectedItems.size === 0) return;
 
+    setIsLoading(true);
+
     const promises = Array.from(selectedItems.keys()).map(id => {
       const apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/dependencies/${id}` : `/api/dependencies/${id}`;
       return fetch(apiUrl).then(res => res.json());
@@ -233,7 +236,8 @@ function App() {
          setSearchResults([]);
          setSelectedItems(new Map());
       })
-      .catch(err => console.error("Fetch failed", err));
+      .catch(err => console.error("Fetch failed", err))
+      .finally(() => setIsLoading(false));
   };
 
 
@@ -351,7 +355,7 @@ function App() {
                         whiteSpace: 'nowrap'
                     }}
                 >
-                    Add ({selectedItems.size})
+                    {isLoading ? 'Fetching...' : `Add (${selectedItems.size})`}
                 </button>
             </div>
 
