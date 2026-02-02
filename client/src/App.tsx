@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import ReactFlow, { Background, Controls, Panel, type Node, type Edge, Position, useNodesState, useEdgesState, MarkerType } from 'reactflow';
+import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType } from 'reactflow';
 import dagre from 'dagre';
 import 'reactflow/dist/style.css';
 import './App.css';
@@ -8,65 +8,145 @@ const dagreGraph = new dagre.graphlib.Graph();
 dagreGraph.setDefaultEdgeLabel(() => ({}));
 
 const nodeWidth = 350;
-// const nodeHeight = 50;
 
-const getGroupedLayoutElements = (nodes: Node[]) => {
+const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
   if (nodes.length === 0) return { nodes: [] };
 
-  const groups: Record<string, Node[]> = {};
-  nodes.forEach((node) => {
-    const type = node.data.type || 'Other';
-    if (!groups[type]) groups[type] = [];
-    groups[type].push(node);
+  // 1. Group Nodes and Edges
+  const typeGroups: Record<string, { nodes: Node[], internalEdges: Edge[] }> = {};
+  const nodeTypeMap = new Map<string, string>();
+
+  nodes.forEach(n => {
+    const type = n.data.type || 'Other';
+    nodeTypeMap.set(n.id, type);
+    if (!typeGroups[type]) typeGroups[type] = { nodes: [], internalEdges: [] };
+    typeGroups[type].nodes.push(n);
   });
 
-  const types = Object.keys(groups).sort();
-  // Arrangement: Grid of Types
-  // We'll try to keep it somewhat square or rectangular
-  // const typesPerColumn = Math.ceil(Math.sqrt(types.length)); 
-  
-  // Spacing between groups
-  // const groupGapX = 300; 
-  // const groupGapY = 50;
-  
-  // Spacing between nodes within a group
-  const nodeGapY = 60;
+  edges.forEach(e => {
+    const sourceType = nodeTypeMap.get(e.source);
+    const targetType = nodeTypeMap.get(e.target);
+    if (sourceType && targetType && sourceType === targetType) {
+      typeGroups[sourceType].internalEdges.push(e);
+    }
+  });
 
-  // Track current positions
-  // let currentGroupX = 0;
-  // let currentGroupY = 0;
+  const finalChildNodes: Node[] = [];
+  const groupDimensions: Record<string, { width: number, height: number }> = {};
   
-  // Max height of a row of groups to determine next Y start
-  // Actually, let's just do columns of types for simplicity first, or wrapping rows.
-  // "Type Columns" might be easier to read left-to-right.
-  // Let's do a simple multi-column layout of TYPES.
-  // Each "Column" on screen is one "Type".
-  
-  const TYPE_COLUMN_WIDTH = nodeWidth + 50;
-  
-  const layoutedNodes: Node[] = [];
-  
-  types.forEach((type, index) => {
-    const groupNodes = groups[type];
-    
-    // Position for this Type Column
-    const groupX = index * TYPE_COLUMN_WIDTH;
-    const groupStartY = 0;
-    
-    groupNodes.forEach((node, nodeIdx) => {
-      layoutedNodes.push({
-        ...node,
-        targetPosition: Position.Left,
-        sourcePosition: Position.Right,
-        position: {
-          x: groupX,
-          y: groupStartY + (nodeIdx * nodeGapY)
-        }
+  const NODE_HEIGHT = 50; 
+  const PADDING = 20;
+  const TITLE_HEIGHT = 40;
+
+  // 2. Layout Internals and Measure Groups
+  Object.keys(typeGroups).forEach(type => {
+      const { nodes: gNodes, internalEdges: gEdges } = typeGroups[type];
+      
+      const gGraph = new dagre.graphlib.Graph();
+      gGraph.setGraph({ rankdir: 'TB', marginx: 0, marginy: 0 }); 
+      gGraph.setDefaultEdgeLabel(() => ({}));
+
+      gNodes.forEach(node => {
+          gGraph.setNode(node.id, { width: nodeWidth, height: NODE_HEIGHT });
       });
-    });
+
+      gEdges.forEach(edge => {
+          gGraph.setEdge(edge.source, edge.target);
+      });
+
+      dagre.layout(gGraph);
+
+      let minX = Infinity, minY = Infinity;
+      let maxX = -Infinity, maxY = -Infinity;
+
+      // Handle single node case or empty graph logic implicitly handled by loop
+      gNodes.forEach(node => {
+          const n = gGraph.node(node.id);
+          const x = n.x - (nodeWidth / 2);
+          const y = n.y - (NODE_HEIGHT / 2);
+          
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x + nodeWidth > maxX) maxX = x + nodeWidth;
+          if (y + NODE_HEIGHT > maxY) maxY = y + NODE_HEIGHT;
+          
+          // Store raw position relative to graph origin
+          node.position = { x, y };
+      });
+      
+      // Shift all nodes to be relative to parent group [0,0] + PADDING
+      gNodes.forEach(node => {
+         node.position.x = node.position.x - minX + PADDING;
+         node.position.y = node.position.y - minY + PADDING + TITLE_HEIGHT;
+         node.parentNode = type; 
+         node.extent = 'parent';
+         finalChildNodes.push(node);
+      });
+
+      groupDimensions[type] = {
+          width: (maxX - minX) + (PADDING * 2),
+          height: (maxY - minY) + (PADDING * 2) + TITLE_HEIGHT
+      };
   });
 
-  return { nodes: layoutedNodes };
+  // 3. Layout Groups (Inter-Type)
+  const masterGraph = new dagre.graphlib.Graph();
+  masterGraph.setGraph({ rankdir: 'LR', nodesep: 100, ranksep: 200 }); 
+  masterGraph.setDefaultEdgeLabel(() => ({}));
+
+  Object.keys(groupDimensions).forEach(type => {
+      masterGraph.setNode(type, { 
+          width: groupDimensions[type].width, 
+          height: groupDimensions[type].height 
+      });
+  });
+
+  const distinctEdges = new Set<string>();
+  edges.forEach(e => {
+      const sType = nodeTypeMap.get(e.source);
+      const tType = nodeTypeMap.get(e.target);
+      if (sType && tType && sType !== tType) {
+          const key = `${sType}->${tType}`;
+          if (!distinctEdges.has(key)) {
+              masterGraph.setEdge(sType, tType);
+              distinctEdges.add(key);
+          }
+      }
+  });
+
+  dagre.layout(masterGraph);
+
+  const groupNodes: Node[] = [];
+  Object.keys(groupDimensions).forEach(type => {
+      const g = masterGraph.node(type);
+      groupNodes.push({
+          id: type,
+          data: { label: type },
+          position: { 
+            x: g.x - (groupDimensions[type].width / 2), 
+            y: g.y - (groupDimensions[type].height / 2) 
+          },
+          style: { 
+            width: groupDimensions[type].width, 
+            height: groupDimensions[type].height,
+            backgroundColor: 'rgba(255, 255, 255, 0.2)',
+            border: '2px dashed #aaa',
+            borderRadius: '8px',
+            fontSize: '20px',
+            fontWeight: 'bold',
+            color: '#333',
+            // textTransform: 'uppercase', // Removed uppercase
+            display: 'flex',
+            justifyContent: 'flex-end', // Align to right
+            alignItems: 'flex-start', // Align to top
+            paddingTop: '10px',
+            paddingRight: '20px', // Add right padding
+            zIndex: -1,
+          }
+      });
+  });
+
+  return { nodes: [...groupNodes, ...finalChildNodes] };
 };
 
 
@@ -179,7 +259,7 @@ function App() {
         newNodes.set(d.metadataComponentId, {
           id: d.metadataComponentId,
           position: { x: 0, y: 0 },
-          data: { label: `${sourceType}: ${d.metadataComponentName}`, type: sourceType },
+          data: { label: d.metadataComponentName, type: sourceType },
           style: { width: nodeWidth },
         });
       }
@@ -189,7 +269,7 @@ function App() {
         newNodes.set(d.refMetadataComponentId, {
           id: d.refMetadataComponentId,
           position: { x: 0, y: 0 },
-          data: { label: `${targetType}: ${d.refMetadataComponentComponentName || d.refMetadataComponentName}`, type: targetType },
+          data: { label: d.refMetadataComponentComponentName || d.refMetadataComponentName, type: targetType },
           style: { width: nodeWidth },
         });
       }
@@ -208,7 +288,8 @@ function App() {
     });
 
     const { nodes: layoutedNodes } = getGroupedLayoutElements(
-      Array.from(newNodes.values())
+      Array.from(newNodes.values()),
+      newEdges
     );
 
     setNodes(layoutedNodes);
