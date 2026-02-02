@@ -169,6 +169,8 @@ function App() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedItems, setSelectedItems] = useState<Map<string, any>>(new Map()); // Map<id, Item>
   const [isLoading, setIsLoading] = useState(false);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(true);
+  const [isLegendExpanded, setIsLegendExpanded] = useState(true);
 
   // Derive all unique types from raw data
   const allTypes = useMemo(() => {
@@ -240,9 +242,10 @@ function App() {
 
              return [...prev, ...uniqueNewData];
          });
-         setSearchTerm(''); // Clear search
-         setSearchResults([]);
-         setSelectedItems(new Map());
+         // Keep search results and selection visible
+         // setSearchTerm('');
+         // setSearchResults([]);
+         // setSelectedItems(new Map());
       })
       .catch(err => console.error("Fetch failed", err))
       .finally(() => setIsLoading(false));
@@ -342,11 +345,19 @@ function App() {
         <Background />
         <Controls />
         
-        <Panel position="top-left" style={{ background: 'white', color: 'black', padding: '10px', borderRadius: '5px', boxShadow: '0 0 10px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>Search Metadata</div>
-            <div style={{ display: 'flex', gap: '5px', marginBottom: '5px' }}>
+        <Panel position="top-left" style={{ background: 'white', color: 'black', padding: '10px', borderRadius: '5px', boxShadow: '0 0 10px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', maxHeight: '80vh', maxWidth: '350px' }}>
+            <div 
+                style={{ fontWeight: 'bold', marginBottom: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                onClick={() => setIsSearchExpanded(!isSearchExpanded)}
+            >
+                <span>Search Metadata</span>
+                <span style={{ marginLeft: '10px' }}>{isSearchExpanded ? '▼' : '▶'}</span>
+            </div>
+            {isSearchExpanded && (
+                <>
+                <div style={{ display: 'flex', gap: '5px', marginBottom: '5px' }}>
                 <input 
-                    type="text" 
+                    type="text"  
                     placeholder="Type to search..." 
                     value={searchTerm} 
                     onChange={(e) => setSearchTerm(e.target.value)} 
@@ -409,9 +420,20 @@ function App() {
                     ))}
                 </ul>
             )}
+            </>
+            )}
         </Panel>
 
         <Panel position="top-right" className="legend">
+          <div 
+             style={{ fontWeight: 'bold', marginBottom: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: isLegendExpanded ? '1px solid #ccc' : 'none', paddingBottom: isLegendExpanded ? '5px' : '0' }}
+             onClick={() => setIsLegendExpanded(!isLegendExpanded)}
+          >
+            <span>Filter Types</span>
+            <span style={{ marginLeft: '10px' }}>{isLegendExpanded ? '▼' : '▶'}</span>
+          </div>
+          {isLegendExpanded && (
+          <>
           <div className="legend-item" style={{ fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '5px', marginBottom: '5px' }}>
             <input 
               type="checkbox" 
@@ -437,6 +459,8 @@ function App() {
               {type}
             </label>
           ))}
+          </>
+          )}
         </Panel>
       </ReactFlow>
     </div>
