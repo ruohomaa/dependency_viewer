@@ -9,10 +9,5 @@ if [ ! -f "$DIR/dist/index.js" ]; then
     npm run build
 fi
 
-# Open browser if serving
-if [ "$1" = "serve" ]; then
-    (sleep 2 && open "http://localhost:3000") &
-fi
-
 # Run the CLI
 node "$DIR/dist/index.js" "$@"
