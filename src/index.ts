@@ -85,8 +85,9 @@ program.command('sync')
 program.command('serve')
   .description('Start the web server')
   .option('-p, --port <port>', 'Port to run on', '3000')
+  .option('-o, --target-org <org>', 'Target Salesforce Org for live dependency fetching')
   .action((options) => {
-    startServer(parseInt(options.port));
+    startServer(parseInt(options.port), options.targetOrg);
   });
 
 program.parse(process.argv);

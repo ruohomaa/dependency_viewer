@@ -122,3 +122,27 @@ export function clearDependencies() {
   getDb().exec('DELETE FROM metadata_dependencies');
   getDb().exec('DELETE FROM metadata_components');
 }
+
+export function searchComponents(query: string) {
+  const term = `%${query}%`;
+  return getDb().prepare('SELECT * FROM metadata_components WHERE name LIKE ? OR id LIKE ? LIMIT 50').all(term, term);
+}
+
+export function getDependenciesForComponent(id: string) {
+  const stmt = getDb().prepare(`
+    SELECT 
+      d.id as dependencyId,
+      s.id as metadataComponentId,
+      s.name as metadataComponentName,
+      s.type as metadataComponentType,
+      t.id as refMetadataComponentId,
+      t.name as refMetadataComponentName,
+      t.type as refMetadataComponentType
+    FROM metadata_dependencies d
+    JOIN metadata_components s ON d.sourceId = s.id
+    JOIN metadata_components t ON d.targetId = t.id
+    WHERE d.sourceId = ? OR d.targetId = ?
+  `);
+  return stmt.all(id, id);
+}
+

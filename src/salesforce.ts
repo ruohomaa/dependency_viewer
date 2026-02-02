@@ -136,3 +136,28 @@ export async function fetchDependencies(targetOrg: string) {
      throw new Error(`Salesforce API Error: ${result.message || 'Unknown error'}`);
   }
 }
+
+export async function fetchDependenciesForId(targetOrg: string, id: string) {
+    const query = `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType FROM MetadataComponentDependency WHERE MetadataComponentId = '${id}' OR RefMetadataComponentId = '${id}'`;
+    
+    // Use sf data query with tooling api flag
+    const command = `sf data query --query "${query}" --target-org "${targetOrg}" --use-tooling-api --json`;
+    
+    // console.log(\`Fetching dependencies for ID: \${id}...\`);
+
+    const stdout = await runCommand(command);
+    
+    let result;
+    try {
+        result = JSON.parse(stdout);
+    } catch (e) {
+        throw new Error('Invalid JSON response from Salesforce');
+    }
+
+    if (result.status === 0 && result.result) {
+        return result.result.records;
+    } else {
+        throw new Error(`Salesforce API Error: ${result.message || 'Unknown error'}`);
+    }
+}
+
