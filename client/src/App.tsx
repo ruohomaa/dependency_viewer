@@ -150,6 +150,14 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
 };
 
 
+const getEffectiveType = (type: string, name: string) => {
+  // If it has the word Test in it then it is a test class
+  if (type === 'ApexClass' && name && name.includes('Test')) {
+    return 'ApexTestClass';
+  }
+  return type;
+};
+
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -166,8 +174,8 @@ function App() {
   const allTypes = useMemo(() => {
     const types = new Set<string>();
     rawData.forEach((d) => {
-      if (d.metadataComponentType) types.add(d.metadataComponentType);
-      if (d.refMetadataComponentType) types.add(d.refMetadataComponentType);
+      if (d.metadataComponentType) types.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
+      if (d.refMetadataComponentType) types.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
     });
     return Array.from(types).sort();
   }, [rawData]);
@@ -225,8 +233,8 @@ function App() {
              // Update visible types
              const newTypes = new Set(visibleTypes);
              uniqueNewData.forEach((d: any) => {
-                if (d.metadataComponentType) newTypes.add(d.metadataComponentType);
-                if (d.refMetadataComponentType) newTypes.add(d.refMetadataComponentType);
+                if (d.metadataComponentType) newTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
+                if (d.refMetadataComponentType) newTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
              });
              setVisibleTypes(newTypes);
 
@@ -252,8 +260,10 @@ function App() {
     const newEdges: Edge[] = [];
     
     rawData.forEach((d: any, index: number) => {
-      const sourceType = d.metadataComponentType;
-      const targetType = d.refMetadataComponentType;
+      const sourceType = getEffectiveType(d.metadataComponentType, d.metadataComponentName);
+      const targetType = d.refMetadataComponentType
+        ? getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentComponentName || d.refMetadataComponentName)
+        : null;
       
       const isSourceVisible = visibleTypes.has(sourceType);
       const isTargetVisible = targetType ? visibleTypes.has(targetType) : false;
