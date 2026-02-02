@@ -181,6 +181,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(true);
   const [isLegendExpanded, setIsLegendExpanded] = useState(true);
+  const [fetchedResults, setFetchedResults] = useState<Map<string, any[]>>(new Map());
 
   // Derive all unique types from raw data
   const allTypes = useMemo(() => {
@@ -210,66 +211,89 @@ function App() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const toggleSearchSelection = (item: any) => {
-    setSelectedItems(prev => {
-        const next = new Map(prev);
-        if (next.has(item.id)) next.delete(item.id);
-        else next.set(item.id, item);
-        return next;
-    });
-  };
-
-  const clearSelection = () => {
-    setSelectedItems(new Map());
-  };
-
-  const handleFetchSelected = () => {
-    if (selectedItems.size === 0) return;
-
+  const fetchDependencies = (item: any) => {
     setIsLoading(true);
-
-    const promises = Array.from(selectedItems.keys()).map(id => {
-      const apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/dependencies/${id}` : `/api/dependencies/${id}`;
-      return fetch(apiUrl).then(res => res.json());
-    });
+    const apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/dependencies/${item.id}` : `/api/dependencies/${item.id}`;
     
-    Promise.all(promises)
-      .then(results => {
-         const fetchedData = results.flat();
-
-         // Create stub records for selected items to ensure they appear even with no dependencies
-         const stubData = Array.from(selectedItems.values()).map(item => ({
+    fetch(apiUrl)
+      .then(res => res.json())
+      .then(fetchedData => {
+         const stubData = {
              id: `stub-${item.id}`,
              metadataComponentId: item.id,
-             metadataComponentName: item.name, // Ensure this matches what search returns
+             metadataComponentName: item.name,
              metadataComponentType: item.type,
              refMetadataComponentId: null,
              refMetadataComponentName: null,
              refMetadataComponentType: null
-         }));
-
-         const newData = [...stubData, ...fetchedData];
-
-         // 1. Update visible types to include types from the new data
-         setVisibleTypes(prevTypes => {
-             const nextTypes = new Set(prevTypes);
-             newData.forEach((d: any) => {
-                if (d.metadataComponentType) nextTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
-                if (d.refMetadataComponentType) nextTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
-             });
-             return nextTypes;
-         });
-
-         // 2. Update rawData, avoiding duplicates
-         setRawData(prev => {
-             const existingIds = new Set(prev.map(p => p.id));
-             const uniqueNewData = newData.filter((d: any) => !existingIds.has(d.id));
-             return [...prev, ...uniqueNewData];
+         };
+         const newData = [stubData, ...fetchedData];
+         
+         setFetchedResults(prev => {
+             const next = new Map(prev);
+             next.set(item.id, newData);
+             return next;
          });
       })
       .catch(err => console.error("Fetch failed", err))
       .finally(() => setIsLoading(false));
   };
+
+  const toggleSearchSelection = (item: any) => {
+    const isSelected = selectedItems.has(item.id);
+
+    if (isSelected) {
+        setSelectedItems(prev => {
+            const next = new Map(prev);
+            if (next.has(item.id)) next.delete(item.id);
+            return next;
+        });
+    } else {
+        setSelectedItems(prev => {
+            const next = new Map(prev);
+            next.set(item.id, item);
+            return next;
+        });
+        if (!fetchedResults.has(item.id)) {
+            fetchDependencies(item);
+        }
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedItems(new Map());
+    setFetchedResults(new Map());
+  };
+
+  useEffect(() => {
+     const nextRawData: any[] = [];
+     const seenIds = new Set<string>();
+     
+     selectedItems.forEach((_, id) => {
+         const items = fetchedResults.get(id);
+         if (items) {
+             items.forEach((d: any) => {
+                 if (!seenIds.has(d.id)) {
+                     seenIds.add(d.id);
+                     nextRawData.push(d);
+                 }
+             });
+         }
+     });
+     
+     setRawData(nextRawData);
+     
+     setVisibleTypes(prevTypes => {
+         const nextTypes = new Set(prevTypes);
+         nextRawData.forEach((d: any) => {
+            if (d.metadataComponentType) nextTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
+            if (d.refMetadataComponentType) nextTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
+         });
+         return nextTypes;
+     });
+  }, [selectedItems, fetchedResults]);
+
+
 
 
   useEffect(() => {
@@ -370,7 +394,7 @@ function App() {
                 style={{ fontWeight: 'bold', marginBottom: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                 onClick={() => setIsSearchExpanded(!isSearchExpanded)}
             >
-                <span>Search Metadata</span>
+                <span>Search Metadata {isLoading && <span style={{fontSize: '0.8em', fontWeight: 'normal', color: '#666'}}>(Loading...)</span>}</span>
                 <span style={{ marginLeft: '10px' }}>{isSearchExpanded ? '▼' : '▶'}</span>
             </div>
             {isSearchExpanded && (
@@ -383,21 +407,7 @@ function App() {
                     onChange={(e) => setSearchTerm(e.target.value)} 
                     style={{ padding: '8px', flex: 1, border: '1px solid #ccc', borderRadius: '4px', color: 'black', background: 'white' }}
                 />
-                 <button 
-                    onClick={handleFetchSelected} 
-                    disabled={isLoading || selectedItems.size === 0}
-                    style={{ 
-                        padding: '8px 12px', 
-                        cursor: (isLoading || selectedItems.size === 0) ? 'not-allowed' : 'pointer',
-                        background: (isLoading || selectedItems.size === 0) ? '#ccc' : '#007bff',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        whiteSpace: 'nowrap'
-                    }}
-                >
-                    {isLoading ? 'Fetching...' : `Add (${selectedItems.size})`}
-                </button>
+
             </div>
 
             {selectedItems.size > 0 && (
