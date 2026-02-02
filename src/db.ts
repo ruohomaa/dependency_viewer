@@ -65,28 +65,12 @@ export function insertDependencyEdges(edges: { sourceId: string, targetId: strin
   // We no longer store edges in the database locally, as they are fetched on demand.
   // This function is kept to avoid breaking existing calls but does nothing persistent.
   // If we wanted to, we could store them in an in-memory cache or a temporary table.
-  
-  /*
-  const stmt = getDb().prepare(`
-    INSERT INTO metadata_dependencies (sourceId, targetId)
-    VALUES (@sourceId, @targetId)
-  `);
-
-  const insertMany = getDb().transaction((items) => {
-    for (const item of items) {
-      if (item.sourceId && item.targetId) stmt.run(item);
-    }
-  });
-
-  insertMany(edges);
-  */
 }
 
 // Keep the old function for backward compatibility or simple bulk inserts, 
 // but implementing it via the new tables
 export function insertDependencies(deps: any[]) {
   const components = new Map<string, { id: string, name: string, type: string }>();
-  // const edges: { sourceId: string, targetId: string }[] = [];
 
   for (const dep of deps) {
     if (dep.MetadataComponentId) {
@@ -103,46 +87,15 @@ export function insertDependencies(deps: any[]) {
         type: dep.RefMetadataComponentType
       });
     }
-    
-    /*
-    if (dep.MetadataComponentId && dep.RefMetadataComponentId) {
-      edges.push({
-        sourceId: dep.MetadataComponentId,
-        targetId: dep.RefMetadataComponentId
-      });
-    }
-    */
   }
 
   insertComponents(Array.from(components.values()));
-  // insertDependencyEdges(edges);
 }
 
 export function getAllDependencies() {
   // This used to return all dependencies from the DB. 
   // Now since we don't store them, it returns empty array or could throw
   return [];
-  
-  /*
-  const stmt = getDb().prepare(`
-    SELECT 
-      d.id as id,
-      s.id as metadataComponentId,
-      s.name as metadataComponentName,
-      s.type as metadataComponentType,
-      s.size as metadataComponentSize,
-      s.coverage as metadataComponentCoverage,
-      t.id as refMetadataComponentId,
-      t.name as refMetadataComponentName,
-      t.type as refMetadataComponentType,
-      t.size as refMetadataComponentSize,
-      t.coverage as refMetadataComponentCoverage
-    FROM metadata_dependencies d
-    JOIN metadata_components s ON d.sourceId = s.id
-    JOIN metadata_components t ON d.targetId = t.id
-  `);
-  return stmt.all();
-  */
 }
 
 export function getComponents() {
@@ -150,7 +103,6 @@ export function getComponents() {
 }
 
 export function clearDependencies() {
-  // getDb().exec('DELETE FROM metadata_dependencies');
   getDb().exec('DELETE FROM metadata_components');
 }
 
@@ -166,23 +118,5 @@ export function getDependenciesForComponent(id: string) {
   // For now returning empty if no table.
   
   return [];
-
-  /*
-  const stmt = getDb().prepare(`
-    SELECT 
-      d.id as dependencyId,
-      s.id as metadataComponentId,
-      s.name as metadataComponentName,
-      s.type as metadataComponentType,
-      t.id as refMetadataComponentId,
-      t.name as refMetadataComponentName,
-      t.type as refMetadataComponentType
-    FROM metadata_dependencies d
-    JOIN metadata_components s ON d.sourceId = s.id
-    JOIN metadata_components t ON d.targetId = t.id
-    WHERE d.sourceId = ? OR d.targetId = ?
-  `);
-  return stmt.all(id, id);
-  */
 }
 
