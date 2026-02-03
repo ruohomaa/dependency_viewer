@@ -20,8 +20,19 @@ export function initDb() {
       type TEXT,
       size INTEGER,
       coverage INTEGER
-    )
+    );
   `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS metadata_dependencies (
+      sourceId TEXT,
+      targetId TEXT,
+      PRIMARY KEY (sourceId, targetId)
+    );
+  `);
+  
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_deps_source ON metadata_dependencies(sourceId);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_deps_target ON metadata_dependencies(targetId);`);
 }
 
 export function insertComponents(components: { id: string, name: string, type: string }[]) {
@@ -62,9 +73,20 @@ export function updateComponentStats(stats: { id: string, size?: number, coverag
 }
 
 export function insertDependencyEdges(edges: { sourceId: string, targetId: string }[]) {
-  // We no longer store edges in the database locally, as they are fetched on demand.
-  // This function is kept to avoid breaking existing calls but does nothing persistent.
-  // If we wanted to, we could store them in an in-memory cache or a temporary table.
+  const stmt = getDb().prepare(`
+    INSERT OR IGNORE INTO metadata_dependencies (sourceId, targetId)
+    VALUES (@sourceId, @targetId)
+  `);
+
+  const insertMany = getDb().transaction((items) => {
+    for (const item of items) {
+      if (item.sourceId && item.targetId) {
+          stmt.run(item);
+      }
+    }
+  });
+
+  insertMany(edges);
 }
 
 // Keep the old function for backward compatibility or simple bulk inserts, 
@@ -92,18 +114,13 @@ export function insertDependencies(deps: any[]) {
   insertComponents(Array.from(components.values()));
 }
 
-export function getAllDependencies() {
-  // This used to return all dependencies from the DB. 
-  // Now since we don't store them, it returns empty array or could throw
-  return [];
-}
-
 export function getComponents() {
     return getDb().prepare('SELECT * FROM metadata_components').all();
 }
 
 export function clearDependencies() {
   getDb().exec('DELETE FROM metadata_components');
+  getDb().exec('DELETE FROM metadata_dependencies');
 }
 
 export function searchComponents(query: string) {
@@ -111,12 +128,46 @@ export function searchComponents(query: string) {
   return getDb().prepare('SELECT * FROM metadata_components WHERE name LIKE ? OR id LIKE ? LIMIT 50').all(term, term);
 }
 
+export function getAllDependencies() {
+  const sql = `
+    SELECT 
+      d.sourceId || '-' || d.targetId as id,
+      d.sourceId as metadataComponentId,
+      s.name as metadataComponentName,
+      s.type as metadataComponentType,
+      s.size as metadataComponentSize,
+      s.coverage as metadataComponentCoverage,
+      d.targetId as refMetadataComponentId,
+      t.name as refMetadataComponentName,
+      t.type as refMetadataComponentType,
+      t.size as refMetadataComponentSize,
+      t.coverage as refMetadataComponentCoverage
+    FROM metadata_dependencies d
+    LEFT JOIN metadata_components s ON d.sourceId = s.id
+    LEFT JOIN metadata_components t ON d.targetId = t.id
+  `;
+  return getDb().prepare(sql).all();
+}
+
 export function getDependenciesForComponent(id: string) {
-  // This is now purely used if we need to query what's currently loaded
-  // But if we are fetching on demand, likely the API will handle it differently
-  // or store in a transient table.
-  // For now returning empty if no table.
-  
-  return [];
+  const sql = `
+    SELECT 
+      d.sourceId || '-' || d.targetId as id,
+      d.sourceId as metadataComponentId,
+      s.name as metadataComponentName,
+      s.type as metadataComponentType,
+      s.size as metadataComponentSize,
+      s.coverage as metadataComponentCoverage,
+      d.targetId as refMetadataComponentId,
+      t.name as refMetadataComponentName,
+      t.type as refMetadataComponentType,
+      t.size as refMetadataComponentSize,
+      t.coverage as refMetadataComponentCoverage
+    FROM metadata_dependencies d
+    LEFT JOIN metadata_components s ON d.sourceId = s.id
+    LEFT JOIN metadata_components t ON d.targetId = t.id
+    WHERE d.sourceId = ? OR d.targetId = ?
+  `;
+  return getDb().prepare(sql).all(id, id);
 }
 

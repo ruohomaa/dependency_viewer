@@ -2,8 +2,8 @@
 import 'dotenv/config';
 import fs from 'fs';
 import { Command } from 'commander';
-import { fetchAllMetadata, fetchApexStats } from './salesforce';
-import { initDb, clearDependencies, insertComponents, updateComponentStats } from './db';
+import { fetchAllMetadata, fetchApexStats, fetchAllDependencies } from './salesforce';
+import { initDb, clearDependencies, insertComponents, updateComponentStats, insertDependencyEdges } from './db';
 import { startServer } from './server';
 
 const program = new Command();
@@ -74,6 +74,16 @@ program.command('sync')
       console.log(`      Saving stats for ${stats.length} components...`);
       updateComponentStats(stats);
 
+      // 3. Fetch dependencies
+      const dependencies = await fetchAllDependencies(options.targetOrg);
+      const edges = dependencies.map((d: any) => ({
+          sourceId: d.MetadataComponentId,
+          targetId: d.RefMetadataComponentId
+      })).filter((e: any) => e.sourceId && e.targetId);
+      
+      console.log(`      Saving ${edges.length} dependency edges...`);
+      insertDependencyEdges(edges);
+
       console.log(`\nDone! Sync complete.`);
     } catch (err: any) {
       console.error('Error:', err.message);
@@ -84,7 +94,7 @@ program.command('sync')
 program.command('serve')
   .description('Start the web server')
   .option('-p, --port <port>', 'Port to run on', '3000')
-  .requiredOption('-o, --target-org <org>', 'Target Salesforce Org for live dependency fetching')
+  .option('-o, --target-org <org>', 'Target Salesforce Org for live dependency fetching')
   .action((options) => {
     startServer(parseInt(options.port), options.targetOrg);
   });

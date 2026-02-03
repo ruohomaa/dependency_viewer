@@ -100,42 +100,6 @@ export async function fetchAllMetadata(targetOrg: string) {
     return allRecords;
 }
 
-export async function fetchDependencies(targetOrg: string) {
-  console.log(`\n[1/2] Fetching Dependency Records from ${targetOrg}...`);
-  console.log('      Querying MetadataComponentDependency (this may take time)...');
-  const startTime = Date.now();
-
-  const query = 'SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType FROM MetadataComponentDependency';
-  
-  // Use sf data query with tooling api flag
-  const command = `sf data query --query "${query}" --target-org "${targetOrg}" --use-tooling-api --json`;
-  
-  let stdout;
-  try {
-      // Note: This attempts to fetch all records in one go. 
-      // For very large orgs, this might hit buffer limits or timeouts.
-      stdout = await runCommand(command);
-  } catch (err: any) {
-      throw new Error(`Failed to execute sf command: ${err.message}`);
-  }
-  
-  let result;
-  try {
-    result = JSON.parse(stdout);
-  } catch (e) {
-    console.error('Failed to parse JSON response from Salesforce');
-    throw new Error('Invalid JSON response from Salesforce');
-  }
-
-  if (result.status === 0 && result.result) {
-    const records = result.result.records;
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`      ✓ Fetched ${records.length} dependency records in ${duration}s`);
-    return records;
-  } else {
-     throw new Error(`Salesforce API Error: ${result.message || 'Unknown error'}`);
-  }
-}
 
 export async function fetchDependenciesForId(targetOrg: string, id: string) {
     const query = `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType FROM MetadataComponentDependency WHERE MetadataComponentId = '${id}' OR RefMetadataComponentId = '${id}'`;
@@ -216,6 +180,68 @@ export async function fetchApexStats(targetOrg: string) {
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`      ✓ Fetched stats for ${statsMap.size} components in ${duration}s.`);
     return Array.from(statsMap.values());
+}
+
+export async function fetchDependencies(targetOrg: string, type: string) {
+    try {
+        const query = `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType FROM MetadataComponentDependency WHERE MetadataComponentType='${type}'`;
+        const stdout = await runCommand(`sf data query --use-tooling-api --query "${query}" --target-org "${targetOrg}" --json`);
+        const result = JSON.parse(stdout);
+        if (result.status === 0 && result.result && result.result.records) {
+            return result.result.records;
+        }
+        return [];
+    } catch (e: any) {
+        return [];
+    }
+}
+
+export async function fetchAllDependencies(targetOrg: string) {
+    console.log(`\n[3/3] Fetching Dependency Edges...`);
+    const startTime = Date.now();
+
+    const types = await describeMetadata(targetOrg);
+    const validTypes = types.filter((typeObj: any) => {
+        const typeName = typeObj.xmlName;
+        if (['User', 'Group', 'Organization', 'DataType', 'EntityDefinition'].includes(typeName)) return false;
+        if (typeName.endsWith('History') || typeName.endsWith('Share') || typeName.endsWith('Feed')) return false;
+        return true;
+    });
+
+    console.log(`      Scanning dependencies for ${validTypes.length} types...`);
+
+    const results: any[] = [];
+    const CONCURRENCY_LIMIT = 5; 
+    const activePromises: Set<Promise<void>> = new Set();
+    let completed = 0;
+
+    for (const typeObj of validTypes) {
+        const typeName = typeObj.xmlName;
+
+        const p = (async () => {
+            const records = await fetchDependencies(targetOrg, typeName);
+            if (records && records.length > 0) {
+                results.push(records);
+            }
+            completed++;
+             const percent = Math.round((completed / validTypes.length) * 100);
+            process.stdout.write(`      Progress: [${completed}/${validTypes.length}] ${percent}% (${typeName})          \r`);
+        })();
+        
+        activePromises.add(p);
+        p.then(() => activePromises.delete(p));
+
+        if (activePromises.size >= CONCURRENCY_LIMIT) {
+            await Promise.race(activePromises);
+        }
+    }
+    
+    await Promise.all(activePromises);
+    const allRecords = results.flat();
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`\n      ✓ Fetched ${allRecords.length} dependency edges in ${duration}s.`);
+    return allRecords;
 }
 
 

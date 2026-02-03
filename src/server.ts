@@ -35,7 +35,21 @@ export function startServer(port: number, targetOrg?: string) {
   app.get('/api/dependencies/:id', async (req: Request, res: Response) => {
     const id = req.params.id as string;
     try {
-      if (targetOrg) {
+      // 1. Try to fetch from local database first, if connected to org maybe we still want local?
+      // For now, if local DB is populated and user didn't explicitly ask for FORCE fetch, use DB.
+      // But adhering to the logic: if connected to org, use org. If not, use DB.
+
+      // Actually, let's mix it. If we have it in DB, return it? 
+      // User asked "view ... from local database rather than fetching...".
+      
+      // Let's modify logic: If targetOrg is NOT set, use DB. 
+      // If targetOrg IS set, use Salesforce.
+      // BUT user said "I would like to have the possibility to see all dependencies" and "from the local database".
+      
+      // I will allow a query param ?source=local to force local
+      const forceLocal = req.query.source === 'local';
+
+      if (targetOrg && !forceLocal) {
          try {
             console.log(`Fetching dependencies for ${id} from Salesforce...`);
             const records = await fetchDependenciesForId(targetOrg, id);
@@ -77,8 +91,12 @@ export function startServer(port: number, targetOrg?: string) {
          }
       }
       
-      // If no targetOrg, we can't really do anything since we don't store dependencies
-       res.json([]);
+      // Fallback to local DB
+      console.log(`Fetching dependencies for ${id} from local DB...`);
+      const { getDependenciesForComponent } = require('./db');
+      const results = getDependenciesForComponent(id);
+      res.json(results);
+
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

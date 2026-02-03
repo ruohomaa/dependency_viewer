@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType } from 'reactflow';
+import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType, Handle, Position } from 'reactflow';
 import dagre from 'dagre';
 import 'reactflow/dist/style.css';
 import './App.css';
@@ -7,7 +7,35 @@ import './App.css';
 const dagreGraph = new dagre.graphlib.Graph();
 dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-const nodeWidth = 350;
+const DataNode = ({ data, selected }: any) => {
+  return (
+     <div style={{
+         width: '100%', height: '100%', borderRadius: '50%',
+         backgroundColor: `hsla(${data.hue}, 70%, 70%, 1)`,
+         border: selected ? '3px solid #333' : `2px solid hsla(${data.hue}, 70%, 40%, 1)`,
+         display: 'flex', alignItems: 'center', justifyContent: 'center',
+         boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+     }}>
+         {data.showLabel && (
+             <div style={{ 
+                 position: 'absolute', 
+                 left: '100%', 
+                 marginLeft: '8px', 
+                 whiteSpace: 'nowrap', 
+                 fontSize: '12px',
+                 fontWeight: 500,
+                 textShadow: '0 0 2px white',
+                 pointerEvents: 'none' 
+             }}>
+                 {data.label}
+             </div>
+         )}
+         <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+         <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+     </div>
+  );
+};
+const nodeTypes = { dataNode: DataNode };
 
 const getColorForType = (type: string) => {
   let hash = 0;
@@ -43,8 +71,6 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
   const finalChildNodes: Node[] = [];
   const groupDimensions: Record<string, { width: number, height: number }> = {};
   
-  const NODE_HEIGHT = 50; 
-  const PADDING = 20;
   const TITLE_HEIGHT = 40;
 
   // 2. Layout Internals and Measure Groups
@@ -52,11 +78,14 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
       const { nodes: gNodes, internalEdges: gEdges } = typeGroups[type];
       
       const gGraph = new dagre.graphlib.Graph();
-      gGraph.setGraph({ rankdir: 'TB', marginx: 0, marginy: 0 }); 
+      gGraph.setGraph({ rankdir: 'LR', marginx: 20, marginy: 20, nodesep: 15, ranksep: 30 }); 
       gGraph.setDefaultEdgeLabel(() => ({}));
 
       gNodes.forEach(node => {
-          gGraph.setNode(node.id, { width: nodeWidth, height: NODE_HEIGHT });
+          // Use dynamic size if available
+          const w = typeof node.style?.width === 'number' ? node.style.width : 50;
+          const h = typeof node.style?.height === 'number' ? node.style.height : 50;
+          gGraph.setNode(node.id, { width: w, height: h });
       });
 
       gEdges.forEach(edge => {
@@ -71,25 +100,30 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
       // Handle single node case or empty graph logic implicitly handled by loop
       gNodes.forEach(node => {
           const n = gGraph.node(node.id);
-          const x = n.x - (nodeWidth / 2);
-          const y = n.y - (NODE_HEIGHT / 2);
+          const w = typeof node.style?.width === 'number' ? node.style.width : 50;
+          const h = typeof node.style?.height === 'number' ? node.style.height : 50;
+          
+          // Dagre nodes are centered
+          const x = n.x - (w / 2);
+          const y = n.y - (h / 2);
           
           if (x < minX) minX = x;
           if (y < minY) minY = y;
-          if (x + nodeWidth > maxX) maxX = x + nodeWidth;
-          if (y + NODE_HEIGHT > maxY) maxY = y + NODE_HEIGHT;
+          if (x + w > maxX) maxX = x + w;
+          if (y + h > maxY) maxY = y + h;
           
           // Store raw position relative to graph origin
           node.position = { x, y };
       });
       
+      const PADDING = 30;
+
       // Shift all nodes to be relative to parent group [0,0] + PADDING
+      // Store them as relative for now, we will make them absolute after master layout
       gNodes.forEach(node => {
          node.position.x = node.position.x - minX + PADDING;
          node.position.y = node.position.y - minY + PADDING + TITLE_HEIGHT;
-         node.parentNode = type; 
-         node.extent = 'parent';
-         finalChildNodes.push(node);
+         // No parentNode or extent since we will flatten them
       });
 
       groupDimensions[type] = {
@@ -125,38 +159,21 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
 
   dagre.layout(masterGraph);
 
-  const groupNodes: Node[] = [];
+  // Apply master layout offsets to all children
   Object.keys(groupDimensions).forEach(type => {
       const g = masterGraph.node(type);
-      const hue = getColorForType(type);
-      groupNodes.push({
-          id: type,
-          data: { label: type },
-          position: { 
-            x: g.x - (groupDimensions[type].width / 2), 
-            y: g.y - (groupDimensions[type].height / 2) 
-          },
-          style: { 
-            width: groupDimensions[type].width, 
-            height: groupDimensions[type].height,
-            backgroundColor: `hsla(${hue}, 70%, 90%, 0.3)`,
-            border: `2px dashed hsl(${hue}, 50%, 40%)`,
-            borderRadius: '8px',
-            fontSize: '20px',
-            fontWeight: 'bold',
-            color: `hsl(${hue}, 50%, 20%)`,
-            // textTransform: 'uppercase', // Removed uppercase
-            display: 'flex',
-            justifyContent: 'flex-end', // Align to right
-            alignItems: 'flex-start', // Align to top
-            paddingTop: '10px',
-            paddingRight: '20px', // Add right padding
-            zIndex: -1,
-          }
+      const groupTopLeftX = g.x - (groupDimensions[type].width / 2);
+      const groupTopLeftY = g.y - (groupDimensions[type].height / 2);
+
+      const { nodes: gNodes } = typeGroups[type];
+      gNodes.forEach(node => {
+         node.position.x += groupTopLeftX;
+         node.position.y += groupTopLeftY;
+         finalChildNodes.push(node);
       });
   });
 
-  return { nodes: [...groupNodes, ...finalChildNodes] };
+  return { nodes: finalChildNodes };
 };
 
 
@@ -182,6 +199,8 @@ function App() {
   const [isSearchExpanded, setIsSearchExpanded] = useState(true);
   const [isLegendExpanded, setIsLegendExpanded] = useState(true);
   const [fetchedResults, setFetchedResults] = useState<Map<string, any[]>>(new Map());
+  const [useLocalDb, setUseLocalDb] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
 
   // Derive all unique types from raw data
   const allTypes = useMemo(() => {
@@ -212,8 +231,9 @@ function App() {
   }, [searchTerm]);
 
   const fetchDependencies = (item: any) => {
-    setIsLoading(true);
-    const apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/dependencies/${item.id}` : `/api/dependencies/${item.id}`;
+    let apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/dependencies/${item.id}` : `/api/dependencies/${item.id}`;
+    if (useLocalDb) apiUrl += '?source=local';
+    // To support user request "view ... from local database", let's assume if we are in "Local View" mode
     
     fetch(apiUrl)
       .then(res => res.json())
@@ -265,36 +285,48 @@ function App() {
     setFetchedResults(new Map());
   };
 
+  const loadAllDependencies = () => {
+      setIsLoading(true);
+      const apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/dependencies` : `/api/dependencies`;
+      
+      fetch(apiUrl)
+        .then(res => res.json())
+        .then(data => {
+            console.log(`Loaded ${data.length} dependencies`);
+            setRawData(data);
+            
+             setVisibleTypes(prevTypes => {
+                const nextTypes = new Set(prevTypes);
+                data.forEach((d: any) => {
+                    if (d.metadataComponentType) nextTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
+                    if (d.refMetadataComponentType) nextTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
+                });
+                return nextTypes;
+            });
+        })
+        .catch(err => console.error("Failed to load all dependencies", err))
+        .finally(() => setIsLoading(false));
+  };
+
   useEffect(() => {
-     const nextRawData: any[] = [];
-     const seenIds = new Set<string>();
-     
-     selectedItems.forEach((_, id) => {
-         const items = fetchedResults.get(id);
-         if (items) {
-             items.forEach((d: any) => {
-                 if (!seenIds.has(d.id)) {
-                     seenIds.add(d.id);
-                     nextRawData.push(d);
-                 }
-             });
-         }
-     });
-     
-     setRawData(nextRawData);
-     
-     setVisibleTypes(prevTypes => {
-         const nextTypes = new Set(prevTypes);
-         nextRawData.forEach((d: any) => {
-            if (d.metadataComponentType) nextTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
-            if (d.refMetadataComponentType) nextTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
-         });
-         return nextTypes;
-     });
+     if (selectedItems.size > 0) {
+        const nextRawData: any[] = [];
+        const seenIds = new Set<string>();
+        
+        selectedItems.forEach((_, id) => {
+            const items = fetchedResults.get(id);
+            if (items) {
+                items.forEach((d: any) => {
+                    if (!seenIds.has(d.id)) {
+                        seenIds.add(d.id);
+                        nextRawData.push(d);
+                    }
+                });
+            }
+        });
+        setRawData(nextRawData);
+     }
   }, [selectedItems, fetchedResults]);
-
-
-
 
   useEffect(() => {
     if (rawData.length === 0) {
@@ -306,6 +338,13 @@ function App() {
     const newNodes = new Map<string, Node>();
     const newEdges: Edge[] = [];
     
+    // Helper to calculate size based on lines of code
+    const calcSize = (size?: number) => {
+        if (!size) return 20; 
+        const v = 15 + (Math.log(size || 10) * 5); // Adjusted log scale
+        return Math.min(Math.max(v, 20), 80);
+    };
+
     rawData.forEach((d: any, index: number) => {
       const sourceType = getEffectiveType(d.metadataComponentType, d.metadataComponentName);
       const targetType = d.refMetadataComponentType
@@ -317,33 +356,47 @@ function App() {
 
       // Create Source Node
       if (isSourceVisible && d.metadataComponentId && !newNodes.has(d.metadataComponentId)) {
+        const size = calcSize(d.metadataComponentSize);
         newNodes.set(d.metadataComponentId, {
           id: d.metadataComponentId,
           position: { x: 0, y: 0 },
-          data: { label: d.metadataComponentName, type: sourceType },
-          style: { width: nodeWidth },
+          type: 'dataNode',
+          data: { 
+              label: d.metadataComponentName, 
+              type: sourceType, 
+              hue: getColorForType(sourceType),
+              showLabel: showLabels 
+          },
+          style: { width: size, height: size },
         });
       }
       
       // Create Target Node
       if (isTargetVisible && d.refMetadataComponentId && !newNodes.has(d.refMetadataComponentId)) {
+        const size = calcSize(d.refMetadataComponentSize);
         newNodes.set(d.refMetadataComponentId, {
           id: d.refMetadataComponentId,
           position: { x: 0, y: 0 },
-          data: { label: d.refMetadataComponentComponentName || d.refMetadataComponentName, type: targetType },
-          style: { width: nodeWidth },
+          type: 'dataNode',
+          data: { 
+              label: d.refMetadataComponentComponentName || d.refMetadataComponentName, 
+              type: targetType!, 
+              hue: getColorForType(targetType!),
+              showLabel: showLabels 
+          },
+          style: { width: size, height: size },
         });
       }
 
       // Create Edge only if both nodes are visible
-      if (isSourceVisible && isTargetVisible && d.metadataComponentId && d.refMetadataComponentId) {
+      if (isSourceVisible && isTargetVisible && d.metadataComponentId && d.refMetadataComponentId && d.metadataComponentId !== d.refMetadataComponentId) {
         newEdges.push({
-          id: `e${d.metadataComponentId}-${d.refMetadataComponentId}-${index}`,
+          id: d.id || `e${d.metadataComponentId}-${d.refMetadataComponentId}-${index}`,
           source: d.metadataComponentId,
           target: d.refMetadataComponentId,
-          markerEnd: {
-             type: MarkerType.ArrowClosed,
-          },
+          type: 'straight',
+          style: { stroke: '#ccc', strokeWidth: 1 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#ccc' },
         });
       }
     });
@@ -355,7 +408,19 @@ function App() {
 
     setNodes(layoutedNodes);
     setEdges(newEdges);
-  }, [rawData, visibleTypes]);
+  }, [rawData, visibleTypes]); // Removed showLabels, handled separately
+
+  // Separate effect to update labels without re-layout
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.type === 'dataNode') {
+          return { ...node, data: { ...node.data, showLabel: showLabels } };
+        }
+        return node;
+      })
+    );
+  }, [showLabels]);
 
   const toggleType = (type: string) => {
     setVisibleTypes((prev) => {
@@ -382,6 +447,7 @@ function App() {
       <ReactFlow 
         nodes={nodes} 
         edges={edges} 
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
@@ -390,6 +456,42 @@ function App() {
         <Controls />
         
         <Panel position="top-left" style={{ background: 'white', color: 'black', padding: '10px', borderRadius: '5px', boxShadow: '0 0 10px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', maxHeight: '80vh', maxWidth: '350px' }}>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                 <button onClick={() => setUseLocalDb(!useLocalDb)} style={{ 
+                     background: useLocalDb ? '#0070d2' : '#f4f6f9',
+                     color: useLocalDb ? 'white' : 'black',
+                     border: '1px solid #ddd',
+                     padding: '5px 10px',
+                     borderRadius: '4px',
+                     cursor: 'pointer',
+                     flex: 1, fontSize: '12px'
+                 }}>
+                     {useLocalDb ? 'Source: Local DB' : 'Source: Salesforce'}
+                 </button>
+                 
+                 <button onClick={loadAllDependencies} style={{
+                     background: '#4caf50',
+                     color: 'white',
+                     border: 'none',
+                     padding: '5px 10px',
+                     borderRadius: '4px',
+                     cursor: 'pointer',
+                     flex: 1, fontSize: '12px'
+                 }}>
+                     Load All (DB)
+                 </button>
+            </div>            
+            <div style={{ marginBottom: '10px' }}>
+                 <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                   <input 
+                     type="checkbox" 
+                     checked={showLabels} 
+                     onChange={(e) => setShowLabels(e.target.checked)}
+                     style={{ marginRight: '8px' }}
+                   />
+                   Show Labels
+                 </label>
+            </div>
             <div 
                 style={{ fontWeight: 'bold', marginBottom: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                 onClick={() => setIsSearchExpanded(!isSearchExpanded)}
