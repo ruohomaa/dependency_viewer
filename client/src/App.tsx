@@ -70,65 +70,156 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
 
   const finalChildNodes: Node[] = [];
   const groupDimensions: Record<string, { width: number, height: number }> = {};
-  
   const TITLE_HEIGHT = 40;
+  const GROUP_PADDING = 30;
 
   // 2. Layout Internals and Measure Groups
   Object.keys(typeGroups).forEach(type => {
       const { nodes: gNodes, internalEdges: gEdges } = typeGroups[type];
-      
-      const gGraph = new dagre.graphlib.Graph();
-      gGraph.setGraph({ rankdir: 'LR', marginx: 20, marginy: 20, nodesep: 15, ranksep: 30 }); 
-      gGraph.setDefaultEdgeLabel(() => ({}));
 
-      gNodes.forEach(node => {
-          // Use dynamic size if available
-          const w = typeof node.style?.width === 'number' ? node.style.width : 50;
-          const h = typeof node.style?.height === 'number' ? node.style.height : 50;
-          gGraph.setNode(node.id, { width: w, height: h });
+      // Identify connected components within the group
+      const adjacency = new Map<string, string[]>();
+      gNodes.forEach(n => adjacency.set(n.id, []));
+      gEdges.forEach(e => {
+         adjacency.get(e.source)?.push(e.target);
+         adjacency.get(e.target)?.push(e.source);
       });
 
-      gEdges.forEach(edge => {
-          gGraph.setEdge(edge.source, edge.target);
+      const visited = new Set<string>();
+      const componentBlocks: { id: string, width: number, height: number, nodes: Node[], offsetX: number, offsetY: number }[] = [];
+
+      gNodes.forEach(node => {
+          if (visited.has(node.id)) return;
+          
+          // BFS for component
+          const componentNodes: Node[] = [];
+          const queue = [node];
+          visited.add(node.id);
+          while(queue.length > 0) {
+              const curr = queue.shift()!;
+              componentNodes.push(curr);
+              adjacency.get(curr.id)?.forEach(nid => {
+                  if (!visited.has(nid)) {
+                      visited.add(nid);
+                      const n = gNodes.find(gn => gn.id === nid);
+                      if (n) queue.push(n);
+                  }
+              });
+          }
+
+          // Layout this component
+          if (componentNodes.length === 1) {
+              const n = componentNodes[0];
+              const w = typeof n.style?.width === 'number' ? n.style.width : 50;
+              const h = typeof n.style?.height === 'number' ? n.style.height : 50;
+              // Reset position relative to block
+              n.position = { x: 0, y: 0 }; 
+              componentBlocks.push({
+                  id: n.id,
+                  width: w,
+                  height: h,
+                  nodes: [n],
+                  offsetX: 0,
+                  offsetY: 0
+              });
+          } else {
+             // Use Dagre for the component
+             const subGraph = new dagre.graphlib.Graph();
+             subGraph.setGraph({ rankdir: 'LR', marginx: 0, marginy: 0, nodesep: 15, ranksep: 30 });
+             subGraph.setDefaultEdgeLabel(() => ({}));
+
+             componentNodes.forEach(n => {
+                const w = typeof n.style?.width === 'number' ? n.style.width : 50;
+                const h = typeof n.style?.height === 'number' ? n.style.height : 50;
+                subGraph.setNode(n.id, { width: w, height: h });
+             });
+
+             const componentNodeIds = new Set(componentNodes.map(n => n.id));
+             gEdges.forEach(e => {
+                 if (componentNodeIds.has(e.source) && componentNodeIds.has(e.target)) {
+                     subGraph.setEdge(e.source, e.target);
+                 }
+             });
+
+             dagre.layout(subGraph);
+
+             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+             componentNodes.forEach(n => {
+                 const dn = subGraph.node(n.id);
+                 const w = dn.width;
+                 const h = dn.height;
+                 // Dagre gives center coordinates
+                 const left = dn.x - w/2;
+                 const top = dn.y - h/2;
+                 if (left < minX) minX = left;
+                 if (top < minY) minY = top;
+                 if (left + w > maxX) maxX = left + w;
+                 if (top + h > maxY) maxY = top + h;
+                 
+                 // Store relative to component bounding box
+                 n.position = { x: left, y: top }; // Temporary, will shift by minX/minY later
+             });
+
+             // Shift nodes to be 0,0 based
+             componentNodes.forEach(n => {
+                 n.position.x -= minX;
+                 n.position.y -= minY;
+             });
+
+             componentBlocks.push({
+                 id: `comp-${componentNodes[0].id}`,
+                 width: maxX - minX,
+                 height: maxY - minY,
+                 nodes: componentNodes,
+                 offsetX: 0,
+                 offsetY: 0
+             });
+          }
       });
 
-      dagre.layout(gGraph);
+      // Pack the component blocks
+      // Heuristic: try to make it roughly square
+      const totalArea = componentBlocks.reduce((acc, b) => acc + (b.width * b.height), 0);
+      const targetWidth = Math.max(200, Math.sqrt(totalArea) * 1.5);
 
-      let minX = Infinity, minY = Infinity;
-      let maxX = -Infinity, maxY = -Infinity;
+      let currentX = 0;
+      let currentY = 0;
+      let rowMaxHeight = 0;
+      let groupMaxX = 0;
+      let groupMaxY = 0;
+      const PADDING = 20;
 
-      // Handle single node case or empty graph logic implicitly handled by loop
-      gNodes.forEach(node => {
-          const n = gGraph.node(node.id);
-          const w = typeof node.style?.width === 'number' ? node.style.width : 50;
-          const h = typeof node.style?.height === 'number' ? node.style.height : 50;
+      // Sort blocks by height makes packing slightly cleaner
+      componentBlocks.sort((a, b) => b.height - a.height);
+
+      componentBlocks.forEach(block => {
+          if (currentX + block.width > targetWidth && currentX > 0) {
+              currentX = 0;
+              currentY += rowMaxHeight + PADDING;
+              rowMaxHeight = 0;
+          }
+
+          block.offsetX = currentX;
+          block.offsetY = currentY;
+
+          currentX += block.width + PADDING;
+          if (block.height > rowMaxHeight) rowMaxHeight = block.height;
           
-          // Dagre nodes are centered
-          const x = n.x - (w / 2);
-          const y = n.y - (h / 2);
-          
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (x + w > maxX) maxX = x + w;
-          if (y + h > maxY) maxY = y + h;
-          
-          // Store raw position relative to graph origin
-          node.position = { x, y };
+          if (currentX > groupMaxX) groupMaxX = currentX;
       });
-      
-      const PADDING = 30;
+      groupMaxY = currentY + rowMaxHeight;
 
-      // Shift all nodes to be relative to parent group [0,0] + PADDING
-      // Store them as relative for now, we will make them absolute after master layout
-      gNodes.forEach(node => {
-         node.position.x = node.position.x - minX + PADDING;
-         node.position.y = node.position.y - minY + PADDING + TITLE_HEIGHT;
-         // No parentNode or extent since we will flatten them
+      // Finalize node positions within the group
+      componentBlocks.forEach(block => {
+          block.nodes.forEach(node => {
+              node.position.x += block.offsetX + GROUP_PADDING;
+              node.position.y += block.offsetY + GROUP_PADDING + TITLE_HEIGHT;
+          });
       });
 
       groupDimensions[type] = {
-          width: (maxX - minX) + (PADDING * 2),
-          height: (maxY - minY) + (PADDING * 2) + TITLE_HEIGHT
+          width: groupMaxX + (GROUP_PADDING * 2),
+          height: groupMaxY + (GROUP_PADDING * 2) + TITLE_HEIGHT
       };
   });
 
@@ -451,6 +542,8 @@ function App() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
+        minZoom={0.01}
+        maxZoom={4}
       >
         <Background />
         <Controls />
