@@ -182,9 +182,10 @@ export async function fetchApexStats(targetOrg: string) {
     return Array.from(statsMap.values());
 }
 
-export async function fetchDependencies(targetOrg: string, type: string) {
+export async function fetchDependenciesByIds(targetOrg: string, ids: string[]) {
     try {
-        const query = `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType FROM MetadataComponentDependency WHERE MetadataComponentType='${type}'`;
+        const idsList = ids.map(id => `'${id}'`).join(',');
+        const query = `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType FROM MetadataComponentDependency WHERE MetadataComponentId IN (${idsList})`;
         const stdout = await runCommand(`sf data query --use-tooling-api --query "${query}" --target-org "${targetOrg}" --json`);
         const result = JSON.parse(stdout);
         if (result.status === 0 && result.result && result.result.records) {
@@ -192,40 +193,41 @@ export async function fetchDependencies(targetOrg: string, type: string) {
         }
         return [];
     } catch (e: any) {
+        // console.error(e.message);
         return [];
     }
 }
 
-export async function fetchAllDependencies(targetOrg: string) {
+export async function fetchAllDependencies(targetOrg: string, allComponents: any[]) {
     console.log(`\n[3/3] Fetching Dependency Edges...`);
     const startTime = Date.now();
 
-    const types = await describeMetadata(targetOrg);
-    const validTypes = types.filter((typeObj: any) => {
-        const typeName = typeObj.xmlName;
-        if (['User', 'Group', 'Organization', 'DataType', 'EntityDefinition'].includes(typeName)) return false;
-        if (typeName.endsWith('History') || typeName.endsWith('Share') || typeName.endsWith('Feed')) return false;
-        return true;
-    });
-
-    console.log(`      Scanning dependencies for ${validTypes.length} types...`);
+    // Filter components that have an ID
+    const validComponents = allComponents.filter(c => c.id);
+    console.log(`      Scanning dependencies for ${validComponents.length} components...`);
 
     const results: any[] = [];
+    const BATCH_SIZE = 20; // 20 IDs per query to stay comfortably within URL/Query limits
     const CONCURRENCY_LIMIT = 5; 
+    
+    // Create chunks
+    const chunks: string[][] = [];
+    for (let i = 0; i < validComponents.length; i += BATCH_SIZE) {
+        chunks.push(validComponents.slice(i, i + BATCH_SIZE).map(c => c.id));
+    }
+
     const activePromises: Set<Promise<void>> = new Set();
     let completed = 0;
 
-    for (const typeObj of validTypes) {
-        const typeName = typeObj.xmlName;
-
+    for (const chunkIds of chunks) {
         const p = (async () => {
-            const records = await fetchDependencies(targetOrg, typeName);
+            const records = await fetchDependenciesByIds(targetOrg, chunkIds);
             if (records && records.length > 0) {
                 results.push(records);
             }
-            completed++;
-             const percent = Math.round((completed / validTypes.length) * 100);
-            process.stdout.write(`      Progress: [${completed}/${validTypes.length}] ${percent}% (${typeName})          \r`);
+            completed += chunkIds.length;
+            const percent = Math.round((completed / validComponents.length) * 100);
+            process.stdout.write(`      Progress: [${completed}/${validComponents.length}] ${percent}%          \r`);
         })();
         
         activePromises.add(p);

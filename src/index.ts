@@ -75,7 +75,7 @@ program.command('sync')
       updateComponentStats(stats);
 
       // 3. Fetch dependencies
-      const dependencies = await fetchAllDependencies(options.targetOrg);
+      const dependencies = await fetchAllDependencies(options.targetOrg, allMeta);
       const edges = dependencies.map((d: any) => ({
           sourceId: d.MetadataComponentId,
           targetId: d.RefMetadataComponentId
