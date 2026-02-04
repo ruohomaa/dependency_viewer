@@ -585,13 +585,16 @@ function AppContent() {
                      {useLocalDb ? 'Source: Local DB' : 'Source: Salesforce'}
                  </button>
                  
-                 <button onClick={loadAllDependencies} style={{
-                     background: '#4caf50',
+                 <button 
+                    onClick={loadAllDependencies} 
+                    disabled={!useLocalDb}
+                    style={{
+                     background: !useLocalDb ? '#ccc' : '#4caf50',
                      color: 'white',
                      border: 'none',
                      padding: '5px 10px',
                      borderRadius: '4px',
-                     cursor: 'pointer',
+                     cursor: !useLocalDb ? 'not-allowed' : 'pointer',
                      flex: 1, fontSize: '12px'
                  }}>
                      Load All (DB)
