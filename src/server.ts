@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import open from 'open';
 import { getAllDependencies, getComponents, initDb, searchComponents } from './db';
-import { fetchDependenciesForId } from './salesforce';
+import { fetchDependenciesForId, openInSalesforce } from './salesforce';
 
 export function startServer(port: number, targetOrg?: string) {
   const app = express();
@@ -19,6 +19,24 @@ export function startServer(port: number, targetOrg?: string) {
       res.json(deps);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/open', async (req: Request, res: Response) => {
+    const { id } = req.body;
+    if (!targetOrg) {
+        return res.status(400).json({ error: 'No target org connected (started without -o/--target-org?)' });
+    }
+    if (!id) {
+        return res.status(400).json({ error: 'No ID provided' });
+    }
+
+    try {
+        await openInSalesforce(targetOrg, id);
+        res.json({ success: true });
+    } catch(err: any) {
+        console.error("Failed to open info Salesforce:", err);
+        res.status(500).json({ error: err.message });
     }
   });
 

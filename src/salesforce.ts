@@ -244,4 +244,14 @@ export async function fetchAllDependencies(targetOrg: string) {
     return allRecords;
 }
 
+export async function openInSalesforce(org: string, id: string) {
+    console.log(`Opening ${id} in ${org}...`);
+    // -r: url only (no json) does not exist for org open, but --url-only results in a URL string if used with json?
+    // Actually sf org open -p /id opens it in the browser.
+    // If we want to return the URL to the client, we might use --url-only -r.
+    // But since this is a local tool, we can just run the command to open the browser.
+    await runCommand(`sf org open --target-org "${org}" --path "/${id}"`);
+}
+
+
 

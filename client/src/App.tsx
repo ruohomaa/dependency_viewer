@@ -71,155 +71,52 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
   const finalChildNodes: Node[] = [];
   const groupDimensions: Record<string, { width: number, height: number }> = {};
   const TITLE_HEIGHT = 40;
-  const GROUP_PADDING = 30;
 
   // 2. Layout Internals and Measure Groups
   Object.keys(typeGroups).forEach(type => {
-      const { nodes: gNodes, internalEdges: gEdges } = typeGroups[type];
+      const { nodes: gNodes } = typeGroups[type];
+      
+      // Sort nodes by label for consistent ordering
+      gNodes.sort((a, b) => (a.data.label || '').localeCompare(b.data.label || ''));
 
-      // Identify connected components within the group
-      const adjacency = new Map<string, string[]>();
-      gNodes.forEach(n => adjacency.set(n.id, []));
-      gEdges.forEach(e => {
-         adjacency.get(e.source)?.push(e.target);
-         adjacency.get(e.target)?.push(e.source);
-      });
+      const count = gNodes.length;
+      const NODE_SIZE = 50;
+      const SPACING = 15;
+      
+      // Use Phyllotaxis arrangement (sunflower pattern) for compact circular packing
+      // spacing constant c needs to factor in node size
+      const c = (NODE_SIZE + SPACING) * 0.75; 
+      
+      // Calculate max extent to clear container size
+      // Theoretically max radius is for the last item
+      const maxRadius = count > 0 ? c * Math.sqrt(count) + (NODE_SIZE/2) : (NODE_SIZE + SPACING);
 
-      const visited = new Set<string>();
-      const componentBlocks: { id: string, width: number, height: number, nodes: Node[], offsetX: number, offsetY: number }[] = [];
+      const padding = 40;
+      const groupWidth = (maxRadius * 2) + padding;
+      const groupHeight = (maxRadius * 2) + padding;
+      
+      const centerX = groupWidth / 2;
+      // Center Y accounts for title height offset
+      const centerY = (groupHeight / 2) + TITLE_HEIGHT;
 
-      gNodes.forEach(node => {
-          if (visited.has(node.id)) return;
+      gNodes.forEach((node, index) => {
+          // Angle = index * 137.5 degrees (golden angle)
+          const angle = index * 2.39996; 
+          const r = c * Math.sqrt(index);
+
+          // ReactFlow position is top-left
+          const w = typeof node.style?.width === 'number' ? node.style.width : NODE_SIZE;
+          const h = typeof node.style?.height === 'number' ? node.style.height : NODE_SIZE;
           
-          // BFS for component
-          const componentNodes: Node[] = [];
-          const queue = [node];
-          visited.add(node.id);
-          while(queue.length > 0) {
-              const curr = queue.shift()!;
-              componentNodes.push(curr);
-              adjacency.get(curr.id)?.forEach(nid => {
-                  if (!visited.has(nid)) {
-                      visited.add(nid);
-                      const n = gNodes.find(gn => gn.id === nid);
-                      if (n) queue.push(n);
-                  }
-              });
-          }
+          const x = centerX + r * Math.cos(angle) - (w / 2);
+          const y = centerY + r * Math.sin(angle) - (h / 2);
 
-          // Layout this component
-          if (componentNodes.length === 1) {
-              const n = componentNodes[0];
-              const w = typeof n.style?.width === 'number' ? n.style.width : 50;
-              const h = typeof n.style?.height === 'number' ? n.style.height : 50;
-              // Reset position relative to block
-              n.position = { x: 0, y: 0 }; 
-              componentBlocks.push({
-                  id: n.id,
-                  width: w,
-                  height: h,
-                  nodes: [n],
-                  offsetX: 0,
-                  offsetY: 0
-              });
-          } else {
-             // Use Dagre for the component
-             const subGraph = new dagre.graphlib.Graph();
-             subGraph.setGraph({ rankdir: 'LR', marginx: 0, marginy: 0, nodesep: 15, ranksep: 30 });
-             subGraph.setDefaultEdgeLabel(() => ({}));
-
-             componentNodes.forEach(n => {
-                const w = typeof n.style?.width === 'number' ? n.style.width : 50;
-                const h = typeof n.style?.height === 'number' ? n.style.height : 50;
-                subGraph.setNode(n.id, { width: w, height: h });
-             });
-
-             const componentNodeIds = new Set(componentNodes.map(n => n.id));
-             gEdges.forEach(e => {
-                 if (componentNodeIds.has(e.source) && componentNodeIds.has(e.target)) {
-                     subGraph.setEdge(e.source, e.target);
-                 }
-             });
-
-             dagre.layout(subGraph);
-
-             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-             componentNodes.forEach(n => {
-                 const dn = subGraph.node(n.id);
-                 const w = dn.width;
-                 const h = dn.height;
-                 // Dagre gives center coordinates
-                 const left = dn.x - w/2;
-                 const top = dn.y - h/2;
-                 if (left < minX) minX = left;
-                 if (top < minY) minY = top;
-                 if (left + w > maxX) maxX = left + w;
-                 if (top + h > maxY) maxY = top + h;
-                 
-                 // Store relative to component bounding box
-                 n.position = { x: left, y: top }; // Temporary, will shift by minX/minY later
-             });
-
-             // Shift nodes to be 0,0 based
-             componentNodes.forEach(n => {
-                 n.position.x -= minX;
-                 n.position.y -= minY;
-             });
-
-             componentBlocks.push({
-                 id: `comp-${componentNodes[0].id}`,
-                 width: maxX - minX,
-                 height: maxY - minY,
-                 nodes: componentNodes,
-                 offsetX: 0,
-                 offsetY: 0
-             });
-          }
-      });
-
-      // Pack the component blocks
-      // Heuristic: try to make it roughly square
-      const totalArea = componentBlocks.reduce((acc, b) => acc + (b.width * b.height), 0);
-      const targetWidth = Math.max(200, Math.sqrt(totalArea) * 1.5);
-
-      let currentX = 0;
-      let currentY = 0;
-      let rowMaxHeight = 0;
-      let groupMaxX = 0;
-      let groupMaxY = 0;
-      const PADDING = 20;
-
-      // Sort blocks by height makes packing slightly cleaner
-      componentBlocks.sort((a, b) => b.height - a.height);
-
-      componentBlocks.forEach(block => {
-          if (currentX + block.width > targetWidth && currentX > 0) {
-              currentX = 0;
-              currentY += rowMaxHeight + PADDING;
-              rowMaxHeight = 0;
-          }
-
-          block.offsetX = currentX;
-          block.offsetY = currentY;
-
-          currentX += block.width + PADDING;
-          if (block.height > rowMaxHeight) rowMaxHeight = block.height;
-          
-          if (currentX > groupMaxX) groupMaxX = currentX;
-      });
-      groupMaxY = currentY + rowMaxHeight;
-
-      // Finalize node positions within the group
-      componentBlocks.forEach(block => {
-          block.nodes.forEach(node => {
-              node.position.x += block.offsetX + GROUP_PADDING;
-              node.position.y += block.offsetY + GROUP_PADDING + TITLE_HEIGHT;
-          });
+          node.position = { x, y };
       });
 
       groupDimensions[type] = {
-          width: groupMaxX + (GROUP_PADDING * 2),
-          height: groupMaxY + (GROUP_PADDING * 2) + TITLE_HEIGHT
+          width: groupWidth,
+          height: groupHeight + TITLE_HEIGHT
       };
   });
 
@@ -399,6 +296,22 @@ function App() {
         .finally(() => setIsLoading(false));
   };
 
+  const onNodeDoubleClick = (_: React.MouseEvent, node: Node) => {
+      const apiUrl = import.meta.env.DEV ? `http://localhost:3000/api/open` : `/api/open`;
+      fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: node.id })
+      })
+      .then(res => {
+          if (!res.ok) return res.json().then(e => { throw new Error(e.error) });
+      })
+      .catch(err => {
+          console.error("Failed to open in Salesforce:", err);
+          alert(`Failed to open in Salesforce: ${err.message}`);
+      });
+  };
+
   useEffect(() => {
      if (selectedItems.size > 0) {
         const nextRawData: any[] = [];
@@ -541,6 +454,7 @@ function App() {
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeDoubleClick={onNodeDoubleClick}
         fitView
         minZoom={0.01}
         maxZoom={4}
