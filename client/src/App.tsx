@@ -174,11 +174,29 @@ const getEffectiveType = (type: string, name: string) => {
   return type;
 };
 
+const matchFilter = (label: string, filter: string) => {
+    if (!filter) return true;
+    if (!label) return false;
+    
+    const l = label.toLowerCase();
+    const f = filter.toLowerCase();
+    
+    if (f.includes('*')) {
+        // Escape regex special characters except *
+        const regexStr = '^' + f.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+        return new RegExp(regexStr).test(l);
+    }
+    
+    return l.includes(f);
+};
+
 function AppContent() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [rawData, setRawData] = useState<any[]>([]);
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set());
+  const [typeFilters, setTypeFilters] = useState<Record<string, string>>({});
+  const [globalFilter, setGlobalFilter] = useState('');
   
   // Force Simulation
   const simulationRef = useRef<any>(null);
@@ -437,8 +455,14 @@ function AppContent() {
         ? getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentComponentName || d.refMetadataComponentName)
         : null;
       
-      const isSourceVisible = visibleTypes.has(sourceType);
-      const isTargetVisible = targetType ? visibleTypes.has(targetType) : false;
+      const isVisible = (type: string, name: string) => {
+          if (!visibleTypes.has(type)) return false;
+          const filter = typeFilters[type] !== undefined ? typeFilters[type] : globalFilter;
+          return matchFilter(name, filter);
+      };
+
+      const isSourceVisible = isVisible(sourceType, d.metadataComponentName);
+      const isTargetVisible = targetType ? isVisible(targetType, d.refMetadataComponentComponentName || d.refMetadataComponentName) : false;
 
       // Create Source Node
       if (isSourceVisible && d.metadataComponentId && !newNodes.has(d.metadataComponentId)) {
@@ -494,7 +518,7 @@ function AppContent() {
 
     setNodes(layoutedNodes);
     setEdges(newEdges);
-  }, [rawData, visibleTypes]); // Removed showLabels, handled separately
+  }, [rawData, visibleTypes, typeFilters, globalFilter]); // Removed showLabels, handled separately
 
   // Separate effect to update labels without re-layout
   useEffect(() => {
@@ -658,6 +682,16 @@ function AppContent() {
           </div>
           {isLegendExpanded && (
           <>
+          <div style={{ marginBottom: '5px' }}>
+            <input 
+                type="text"
+                placeholder="Global Filter (* for wildcard)"
+                value={globalFilter}
+                onChange={(e) => setGlobalFilter(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: '100%', padding: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '3px' }}
+            />
+          </div>
           <div className="legend-item" style={{ fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '5px', marginBottom: '5px' }}>
             <input 
               type="checkbox" 
@@ -674,22 +708,42 @@ function AppContent() {
           </div>
           {allTypes.length === 0 && <div style={{padding: '5px', color: '#666'}}>No data loaded</div>}
           {allTypes.map((type) => (
-            <label key={type} className="legend-item">
-              <input
-                type="checkbox"
-                checked={visibleTypes.has(type)}
-                onChange={() => toggleType(type)}
-              />
-               <span style={{ 
-                  display: 'inline-block', 
-                  width: '12px', 
-                  height: '12px', 
-                  backgroundColor: `hsl(${getColorForType(type)}, 60%, 60%)`,
-                  borderRadius: '2px',
-                  border: '1px solid rgba(0,0,0,0.1)'
-              }}></span>
-              {type}
-            </label>
+            <div key={type} className="legend-item" style={{ justifyContent: 'space-between' }}>
+                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={visibleTypes.has(type)}
+                    onChange={() => toggleType(type)}
+                  />
+                   <span style={{ 
+                      display: 'inline-block', 
+                      width: '12px', 
+                      height: '12px', 
+                      backgroundColor: `hsl(${getColorForType(type)}, 60%, 60%)`,
+                      borderRadius: '2px',
+                      border: '1px solid rgba(0,0,0,0.1)',
+                      marginLeft: '6px',
+                      marginRight: '6px'
+                  }}></span>
+                  {type}
+                </label>
+                <input 
+                   type="text"
+                   placeholder="Filter"
+                   value={typeFilters[type] || ''}
+                   onChange={(e) => {
+                       const val = e.target.value;
+                       setTypeFilters(prev => {
+                           const next = {...prev};
+                           if (val) next[type] = val;
+                           else delete next[type];
+                           return next;
+                       });
+                   }}
+                   onClick={(e) => e.stopPropagation()}
+                   style={{ width: '60px', padding: '2px', fontSize: '11px', border: '1px solid #ccc', borderRadius: '3px' }}
+                />
+            </div>
           ))}
           </>
           )}
