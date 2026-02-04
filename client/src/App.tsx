@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
-import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType, Handle, Position } from 'reactflow';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType, Handle, Position, ReactFlowProvider } from 'reactflow';
 import dagre from 'dagre';
+import * as d3 from 'd3-force';
 import 'reactflow/dist/style.css';
 import './App.css';
 
@@ -173,11 +174,14 @@ const getEffectiveType = (type: string, name: string) => {
   return type;
 };
 
-function App() {
+function AppContent() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [rawData, setRawData] = useState<any[]>([]);
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set());
+  
+  // Force Simulation
+  const simulationRef = useRef<any>(null);
   
   // Search State
   const [searchTerm, setSearchTerm] = useState('');
@@ -189,6 +193,84 @@ function App() {
   const [fetchedResults, setFetchedResults] = useState<Map<string, any[]>>(new Map());
   const [useLocalDb, setUseLocalDb] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
+
+  useEffect(() => {
+     // Re-layout when effective nodes/edges change
+     if (nodes.length > 0) {
+        // Run static layout first
+        const { nodes: layoutNodes } = getGroupedLayoutElements(nodes, edges);
+
+        // Initialize Force Simulation
+        if (simulationRef.current) {
+            simulationRef.current.stop();
+        }
+
+        const simNodes = layoutNodes.map(n => ({ 
+            ...n, 
+            x: n.position.x, 
+            y: n.position.y,
+            // Store initial group position for clustering force
+            initialX: n.position.x,
+            initialY: n.position.y
+        }));
+        
+        const simLinks = edges.map(e => ({ ...e, source: e.source, target: e.target }));
+
+        const simulation = d3.forceSimulation(simNodes as any)
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("link", d3.forceLink(simLinks as any).id((d: any) => d.id).distance(100))
+            .force("collide", d3.forceCollide().radius((d: any) => (d.style?.width || 50) / 2 + 10))
+            // Add a force to pull nodes back to their group center/initial position to maintain clusters
+            .force("x", d3.forceX((d: any) => d.initialX).strength(0.05))
+            .force("y", d3.forceY((d: any) => d.initialY).strength(0.05))
+            .alphaDecay(0.05);
+
+        simulation.on("tick", () => {
+             setNodes(prev => prev.map(n => {
+                 const simNode = simNodes.find(sn => sn.id === n.id);
+                 if (simNode) {
+                     return { ...n, position: { x: simNode.x, y: simNode.y } };
+                 }
+                 return n;
+             }));
+        });
+
+        simulationRef.current = simulation;
+
+        return () => {
+            if (simulationRef.current) simulationRef.current.stop();
+        };
+     }
+  }, [nodes.length, edges.length]); // Only re-run if count changes, not on positions
+
+  const onNodeDragStart = useCallback((_: any, node: Node) => {
+      if (!simulationRef.current) return;
+      simulationRef.current.alphaTarget(0.3).restart();
+      const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
+      if (n) {
+          n.fx = node.position.x;
+          n.fy = node.position.y;
+      }
+  }, []);
+
+  const onNodeDrag = useCallback((_: any, node: Node) => {
+      if (!simulationRef.current) return;
+      const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
+      if (n) {
+          n.fx = node.position.x;
+          n.fy = node.position.y;
+      }
+  }, []);
+
+  const onNodeDragStop = useCallback((_: any, node: Node) => {
+      if (!simulationRef.current) return;
+      if (!(_ as any).active) simulationRef.current.alphaTarget(0);
+      const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
+      if (n) {
+          n.fx = null;
+          n.fy = null;
+      }
+  }, []);
 
   // Derive all unique types from raw data
   const allTypes = useMemo(() => {
@@ -455,6 +537,9 @@ function App() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDoubleClick={onNodeDoubleClick}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
         fitView
         minZoom={0.01}
         maxZoom={4}
@@ -611,6 +696,14 @@ function App() {
         </Panel>
       </ReactFlow>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ReactFlowProvider>
+      <AppContent />
+    </ReactFlowProvider>
   );
 }
 
