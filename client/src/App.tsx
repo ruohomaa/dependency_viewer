@@ -168,7 +168,7 @@ const getGroupedLayoutElements = (nodes: Node[], edges: Edge[]) => {
 
 const getEffectiveType = (type: string, name: string) => {
   // If it has the word Test in it then it is a test class
-  if (type === 'ApexClass' && name && name.includes('Test')) {
+  if (type === 'ApexClass' && name && name.toLowerCase().includes('test')) {
     return 'ApexTestClass';
   }
   return type;
@@ -211,6 +211,7 @@ function AppContent() {
   const [fetchedResults, setFetchedResults] = useState<Map<string, any[]>>(new Map());
   const [useLocalDb, setUseLocalDb] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
+  const [showOrphansOnly, setShowOrphansOnly] = useState(false);
 
   useEffect(() => {
      // Re-layout when effective nodes/edges change
@@ -442,6 +443,14 @@ function AppContent() {
     const newNodes = new Map<string, Node>();
     const newEdges: Edge[] = [];
     
+    // Calculate incoming edges to identify orphans
+    const hasIncoming = new Set<string>();
+    rawData.forEach((d: any) => {
+        if (d.metadataComponentId && d.refMetadataComponentId && d.metadataComponentId !== d.refMetadataComponentId) {
+            hasIncoming.add(d.refMetadataComponentId);
+        }
+    });
+
     // Helper to calculate size based on lines of code
     const calcSize = (size?: number) => {
         if (!size) return 20; 
@@ -455,14 +464,15 @@ function AppContent() {
         ? getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentComponentName || d.refMetadataComponentName)
         : null;
       
-      const isVisible = (type: string, name: string) => {
+      const isVisible = (type: string, name: string, id: string) => {
+          if (showOrphansOnly && hasIncoming.has(id)) return false;
           if (!visibleTypes.has(type)) return false;
           const filter = typeFilters[type] !== undefined ? typeFilters[type] : globalFilter;
           return matchFilter(name, filter);
       };
 
-      const isSourceVisible = isVisible(sourceType, d.metadataComponentName);
-      const isTargetVisible = targetType ? isVisible(targetType, d.refMetadataComponentComponentName || d.refMetadataComponentName) : false;
+      const isSourceVisible = d.metadataComponentId ? isVisible(sourceType, d.metadataComponentName, d.metadataComponentId) : false;
+      const isTargetVisible = targetType && d.refMetadataComponentId ? isVisible(targetType, d.refMetadataComponentComponentName || d.refMetadataComponentName, d.refMetadataComponentId) : false;
 
       // Create Source Node
       if (isSourceVisible && d.metadataComponentId && !newNodes.has(d.metadataComponentId)) {
@@ -518,7 +528,7 @@ function AppContent() {
 
     setNodes(layoutedNodes);
     setEdges(newEdges);
-  }, [rawData, visibleTypes, typeFilters, globalFilter]); // Removed showLabels, handled separately
+  }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly]); // Removed showLabels, handled separately
 
   // Separate effect to update labels without re-layout
   useEffect(() => {
@@ -694,6 +704,17 @@ function AppContent() {
                 onClick={(e) => e.stopPropagation()}
                 style={{ width: '100%', padding: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '3px' }}
             />
+          </div>
+          <div style={{ marginBottom: '5px', borderBottom: '1px solid #eee', paddingBottom: '5px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1, fontWeight: '500' }}>
+                <input 
+                    type="checkbox" 
+                    checked={showOrphansOnly} 
+                    onChange={(e) => setShowOrphansOnly(e.target.checked)}
+                    style={{ marginRight: '6px' }}
+                />
+                Show Orphans Only
+            </label>
           </div>
           <div className="legend-item" style={{ fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '5px', marginBottom: '5px' }}>
             <input 
