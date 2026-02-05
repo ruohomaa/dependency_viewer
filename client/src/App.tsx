@@ -212,6 +212,8 @@ function AppContent() {
   const [useLocalDb, setUseLocalDb] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
   const [showOrphansOnly, setShowOrphansOnly] = useState(false);
+  const [showHighlyConnected, setShowHighlyConnected] = useState(false);
+  const [connectionThreshold, setConnectionThreshold] = useState(5);
 
   useEffect(() => {
      // Re-layout when effective nodes/edges change
@@ -443,11 +445,18 @@ function AppContent() {
     const newNodes = new Map<string, Node>();
     const newEdges: Edge[] = [];
     
-    // Calculate incoming edges to identify orphans
+    // Calculate incoming edges to identify orphans and total connections
     const hasIncoming = new Set<string>();
+    const connectionCounts = new Map<string, number>();
+
     rawData.forEach((d: any) => {
         if (d.metadataComponentId && d.refMetadataComponentId && d.metadataComponentId !== d.refMetadataComponentId) {
             hasIncoming.add(d.refMetadataComponentId);
+            
+            const src = d.metadataComponentId;
+            const tgt = d.refMetadataComponentId;
+            connectionCounts.set(src, (connectionCounts.get(src) || 0) + 1);
+            connectionCounts.set(tgt, (connectionCounts.get(tgt) || 0) + 1);
         }
     });
 
@@ -466,6 +475,10 @@ function AppContent() {
       
       const isVisible = (type: string, name: string, id: string) => {
           if (showOrphansOnly && hasIncoming.has(id)) return false;
+          if (showHighlyConnected) {
+             const count = connectionCounts.get(id) || 0;
+             if (count < connectionThreshold) return false;
+          }
           if (!visibleTypes.has(type)) return false;
           const filter = typeFilters[type] !== undefined ? typeFilters[type] : globalFilter;
           return matchFilter(name, filter);
@@ -528,7 +541,7 @@ function AppContent() {
 
     setNodes(layoutedNodes);
     setEdges(newEdges);
-  }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly]); // Removed showLabels, handled separately
+  }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly, showHighlyConnected, connectionThreshold]); // Removed showLabels, handled separately
 
   // Separate effect to update labels without re-layout
   useEffect(() => {
@@ -715,6 +728,30 @@ function AppContent() {
                 />
                 Show Orphans Only
             </label>
+          </div>
+          <div style={{ marginBottom: '5px', borderBottom: '1px solid #eee', paddingBottom: '5px' }}>
+             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1, fontWeight: '500', marginBottom: showHighlyConnected ? '4px' : '0' }}>
+                <input 
+                    type="checkbox" 
+                    checked={showHighlyConnected} 
+                    onChange={(e) => setShowHighlyConnected(e.target.checked)}
+                    style={{ marginRight: '6px' }}
+                />
+                Show Highly Connected
+            </label>
+            {showHighlyConnected && (
+                <div style={{ paddingLeft: '24px' }}>
+                    <input 
+                        type="number" 
+                        min="1"
+                        value={connectionThreshold} 
+                        onChange={(e) => setConnectionThreshold(parseInt(e.target.value) || 1)}
+                        onClick={(e) => e.stopPropagation()} 
+                         style={{ width: '50px', padding: '2px', fontSize: '11px', border: '1px solid #ccc', borderRadius: '3px' }}
+                    />
+                    <span style={{ fontSize: '11px', marginLeft: '5px', color: '#666' }}>min connections</span>
+                </div>
+            )}
           </div>
           <div className="legend-item" style={{ fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '5px', marginBottom: '5px' }}>
             <input 
