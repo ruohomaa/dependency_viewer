@@ -285,8 +285,8 @@ function AppContent() {
       if (!(_ as any).active) simulationRef.current.alphaTarget(0);
       const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
       if (n) {
-          n.fx = null;
-          n.fy = null;
+          n.fx = node.position.x;
+          n.fy = node.position.y;
       }
   }, []);
 
