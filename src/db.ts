@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 
 let db: Database.Database;
 
-function getDb() {
+export function getDb() {
   if (!db) {
     const dbPath = process.env.DATABASE_PATH || 'dependencies.db';
     db = new Database(dbPath);
@@ -133,13 +133,13 @@ export function getAllDependencies() {
     SELECT 
       d.sourceId || '-' || d.targetId as id,
       d.sourceId as metadataComponentId,
-      s.name as metadataComponentName,
-      s.type as metadataComponentType,
+      COALESCE(s.name, d.sourceId) as metadataComponentName,
+      COALESCE(s.type, 'Unknown') as metadataComponentType,
       s.size as metadataComponentSize,
       s.coverage as metadataComponentCoverage,
       d.targetId as refMetadataComponentId,
-      t.name as refMetadataComponentName,
-      t.type as refMetadataComponentType,
+      COALESCE(t.name, d.targetId) as refMetadataComponentName,
+      COALESCE(t.type, 'Unknown') as refMetadataComponentType,
       t.size as refMetadataComponentSize,
       t.coverage as refMetadataComponentCoverage
     FROM metadata_dependencies d
@@ -154,13 +154,13 @@ export function getDependenciesForComponent(id: string) {
     SELECT 
       d.sourceId || '-' || d.targetId as id,
       d.sourceId as metadataComponentId,
-      s.name as metadataComponentName,
-      s.type as metadataComponentType,
+      COALESCE(s.name, d.sourceId) as metadataComponentName,
+      COALESCE(s.type, 'Unknown') as metadataComponentType,
       s.size as metadataComponentSize,
       s.coverage as metadataComponentCoverage,
       d.targetId as refMetadataComponentId,
-      t.name as refMetadataComponentName,
-      t.type as refMetadataComponentType,
+      COALESCE(t.name, d.targetId) as refMetadataComponentName,
+      COALESCE(t.type, 'Unknown') as refMetadataComponentType,
       t.size as refMetadataComponentSize,
       t.coverage as refMetadataComponentCoverage
     FROM metadata_dependencies d
