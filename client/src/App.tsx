@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType, Handle, Position, ReactFlowProvider } from 'reactflow';
+import ReactFlow, { Background, Controls, Panel, type Node, type Edge, useNodesState, useEdgesState, MarkerType, Handle, Position, ReactFlowProvider, useReactFlow } from 'reactflow';
 import dagre from 'dagre';
 import * as d3 from 'd3-force';
 import 'reactflow/dist/style.css';
@@ -174,6 +174,82 @@ const getEffectiveType = (type: string, name: string) => {
   return type;
 };
 
+// --- Cluster Analysis Logic ---
+interface Cluster {
+  id: number;
+  nodeIds: Set<string>;
+  nodes: any[];
+  size: number;
+}
+
+const findClusters = (data: any[]): Cluster[] => {
+  const adjList = new Map<string, Set<string>>();
+  const nodeMap = new Map<string, any>();
+
+  // Build Graph
+  data.forEach((d) => {
+    // Register Nodes
+    if (d.metadataComponentId) {
+      if (!adjList.has(d.metadataComponentId)) adjList.set(d.metadataComponentId, new Set());
+      if (!nodeMap.has(d.metadataComponentId)) nodeMap.set(d.metadataComponentId, { id: d.metadataComponentId, name: d.metadataComponentName, type: d.metadataComponentType });
+    }
+    if (d.refMetadataComponentId) {
+      if (!adjList.has(d.refMetadataComponentId)) adjList.set(d.refMetadataComponentId, new Set());
+       // Note: d.refMetadataComponentName might be missing if it's just a ref, but usually we have it
+       if (!nodeMap.has(d.refMetadataComponentId)) {
+           nodeMap.set(d.refMetadataComponentId, { 
+               id: d.refMetadataComponentId, 
+               name: d.refMetadataComponentName || d.refMetadataComponentComponentName, 
+               type: d.refMetadataComponentType 
+            });
+       }
+    }
+
+    // Register Edges (Undirected for cluster analysis)
+    if (d.metadataComponentId && d.refMetadataComponentId && d.metadataComponentId !== d.refMetadataComponentId) {
+      adjList.get(d.metadataComponentId)?.add(d.refMetadataComponentId);
+      adjList.get(d.refMetadataComponentId)?.add(d.metadataComponentId);
+    }
+  });
+
+  const visited = new Set<string>();
+  const clusters: Cluster[] = [];
+  let clusterId = 1;
+
+  for (const nodeId of adjList.keys()) {
+    if (!visited.has(nodeId)) {
+      const clusterNodes = new Set<string>();
+      const queue = [nodeId];
+      visited.add(nodeId);
+      clusterNodes.add(nodeId);
+
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const neighbors = adjList.get(curr);
+        if (neighbors) {
+          for (const neighbor of neighbors) {
+            if (!visited.has(neighbor)) {
+              visited.add(neighbor);
+              clusterNodes.add(neighbor);
+              queue.push(neighbor);
+            }
+          }
+        }
+      }
+
+      clusters.push({
+        id: clusterId++,
+        nodeIds: clusterNodes,
+        nodes: Array.from(clusterNodes).map(id => nodeMap.get(id)).filter(n => n),
+        size: clusterNodes.size
+      });
+    }
+  }
+
+  // Sort by size (descending)
+  return clusters.sort((a, b) => b.size - a.size);
+};
+
 const matchFilter = (label: string, filter: string) => {
     if (!filter) return true;
     if (!label) return false;
@@ -191,12 +267,18 @@ const matchFilter = (label: string, filter: string) => {
 };
 
 function AppContent() {
+  const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [rawData, setRawData] = useState<any[]>([]);
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set());
   const [typeFilters, setTypeFilters] = useState<Record<string, string>>({});
   const [globalFilter, setGlobalFilter] = useState('');
+  
+  // Cluster Analysis State
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
+  const [isAnalysisRunning, setIsAnalysisRunning] = useState(false);
   
   // Force Simulation
   const simulationRef = useRef<any>(null);
@@ -541,6 +623,10 @@ function AppContent() {
 
     setNodes(layoutedNodes);
     setEdges(newEdges);
+    
+    if (layoutedNodes.length > 0) {
+       setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
+    }
   }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly, showHighlyConnected, connectionThreshold]); // Removed showLabels, handled separately
 
   // Separate effect to update labels without re-layout
@@ -573,6 +659,33 @@ function AppContent() {
     } else {
       setVisibleTypes(new Set());
     }
+  };
+
+  const runAnalysis = () => {
+    setIsAnalysisRunning(true);
+    // Defer to next tick to allow UI to update
+    setTimeout(() => {
+        const results = findClusters(rawData);
+        setClusters(results);
+        setIsAnalysisRunning(false);
+        setShowAnalysisPanel(true);
+    }, 100);
+  };
+  
+  const selectCluster = (cluster: Cluster) => {
+      setSelectedItems(new Map()); // clear previous
+      const nextSelected = new Map();
+      cluster.nodes.forEach(n => {
+         const item = { id: n.id, name: n.name, type: n.type };
+         // Create a faux item to select
+         nextSelected.set(n.id, item);
+
+         // Ensure we have data for this item, otherwise the graph will be empty for it
+         if (!fetchedResults.has(n.id)) {
+             fetchDependencies(item);
+         }
+      });
+      setSelectedItems(nextSelected);
   };
 
   return (
@@ -718,6 +831,31 @@ function AppContent() {
                 style={{ width: '100%', padding: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '3px' }}
             />
           </div>
+          <div style={{ paddingBottom: '10px', marginBottom: '5px', borderBottom: '1px solid #eee' }}>
+             <button 
+                onClick={runAnalysis}
+                disabled={isAnalysisRunning || rawData.length === 0}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  background: '#0176d3',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+             >
+                {isAnalysisRunning ? 'Running Analysis...' : 'Find Island Clusters'}
+             </button>
+             {clusters.length > 0 && (
+                <div style={{ marginTop: '5px', fontSize: '12px', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Found {clusters.filter(c => c.size > 1).length} groups</span>
+                    <button onClick={() => setShowAnalysisPanel(true)} style={{ background:'none', border:'none', color:'#0176d3', cursor:'pointer', textDecoration:'underline', padding:0 }}>View Results</button>
+                </div>
+             )}
+          </div>
+
           <div style={{ marginBottom: '5px', borderBottom: '1px solid #eee', paddingBottom: '5px' }}>
             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1, fontWeight: '500' }}>
                 <input 
@@ -809,6 +947,75 @@ function AppContent() {
           </>
           )}
         </Panel>
+
+        {showAnalysisPanel && (
+            <Panel position="bottom-center" style={{ 
+                background: 'white', 
+                color: 'black', 
+                padding: '10px', 
+                borderRadius: '8px', 
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+                width: '600px', 
+                maxHeight: '400px', 
+                display: 'flex', 
+                flexDirection: 'column',
+                pointerEvents: 'all'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '16px' }}>Cluster Analysis Results</span>
+                    <button onClick={() => setShowAnalysisPanel(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#666' }}>&times;</button>
+                </div>
+                <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {clusters.filter(c => c.size > 1).length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>No isolated clusters found (everything is connected to the main graph).</div>
+                    ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead style={{ background: '#f4f6f9', position: 'sticky', top: 0 }}>
+                                <tr>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Cluster ID</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Size</th>
+                                    <th style={{ textAlign: 'left', padding: '8px' }}>Sample Components</th>
+                                    <th style={{ textAlign: 'center', padding: '8px' }}>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {clusters.filter(c => c.size > 1).map(cluster => (
+                                    <tr key={cluster.id} style={{ borderBottom: '1px solid #eee' }} className="cluster-row">
+                                        <td style={{ padding: '8px' }}>#{cluster.id}</td>
+                                        <td style={{ padding: '8px', fontWeight: 'bold' }}>{cluster.size}</td>
+                                        <td style={{ padding: '8px' }}>
+                                            <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px' }}>
+                                                {cluster.nodes.slice(0, 3).map(n => n.name).join(', ')}
+                                                {cluster.size > 3 && `, +${cluster.size - 3} more`}
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                                            <button 
+                                                onClick={() => selectCluster(cluster)}
+                                                style={{ 
+                                                    background: '#0176d3', 
+                                                    color: 'white', 
+                                                    border: 'none', 
+                                                    borderRadius: '4px', 
+                                                    padding: '4px 8px', 
+                                                    cursor: 'pointer',
+                                                    fontSize: '11px' 
+                                                }}
+                                            >
+                                                Select Items
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '11px', color: '#666', borderTop: '1px solid #eee', paddingTop: '5px' }}>
+                    * Showing groups of items that are connected to each other but isolated from the rest of the org. Ideal candidates for packaging.
+                </div>
+            </Panel>
+        )}
       </ReactFlow>
     </div>
   );
