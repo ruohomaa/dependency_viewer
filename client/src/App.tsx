@@ -542,6 +542,64 @@ function AppContent() {
         }
     });
 
+    // NEW: Calculate Strict Filter (Matched + Dependencies)
+    // If strict filtering is active (global or type-specific), we identify "Seed" nodes that match the filter.
+    // Then we assume any connected node (neighbor) is also relevant for context and include it.
+    // Unfiltered types will only self-display if connected to a match.
+    
+    const activeFilterTypes = new Set<string>();
+    Object.entries(typeFilters).forEach(([t, f]) => {
+        if (f && f.length > 0) activeFilterTypes.add(t);
+    });
+    const isGlobalFilterActive = globalFilter && globalFilter.length > 0;
+    const isFilteringActive = activeFilterTypes.size > 0 || isGlobalFilterActive;
+    
+    let allowedIds: Set<string> | null = null;
+    
+    if (isFilteringActive) {
+        allowedIds = new Set<string>();
+        const matchedIds = new Set<string>();
+        
+        // Pass 1: Identify "Seed" nodes (Direct Matches)
+        rawData.forEach((d: any) => {
+            const checkSeed = (id: string, name: string, rawType: string) => {
+                if (!id) return;
+                const type = getEffectiveType(rawType, name);
+                
+                // Only consider checking if the type is visible
+                if (!visibleTypes.has(type)) return;
+
+                // Check if this type participates in the explicit filtering
+                // Global filter affects all. Type filter affects specific.
+                const hasSpecificFilter = activeFilterTypes.has(type);
+                const hasExplicitFilter = hasSpecificFilter || isGlobalFilterActive;
+                
+                // If this type has NO explicit filter, it cannot be a seed 
+                // (it can only be visible via dependency on a seed)
+                if (!hasExplicitFilter) return;
+
+                const filter = hasSpecificFilter ? typeFilters[type] : globalFilter;
+                if (matchFilter(name, filter)) {
+                    matchedIds.add(id);
+                    allowedIds!.add(id);
+                }
+            };
+            
+            if (d.metadataComponentId) checkSeed(d.metadataComponentId, d.metadataComponentName, d.metadataComponentType);
+            if (d.refMetadataComponentId) checkSeed(d.refMetadataComponentId, d.refMetadataComponentName || d.refMetadataComponentComponentName, d.refMetadataComponentType);
+        });
+        
+        // Pass 2: Add Neighbors of Seeds
+        rawData.forEach((d: any) => {
+            const sId = d.metadataComponentId;
+            const tId = d.refMetadataComponentId;
+            if (sId && tId && sId !== tId) {
+                if (matchedIds.has(sId)) allowedIds!.add(tId);
+                if (matchedIds.has(tId)) allowedIds!.add(sId);
+            }
+        });
+    }
+
     // Helper to calculate size based on lines of code
     const calcSize = (size?: number) => {
         if (!size) return 20; 
@@ -562,6 +620,11 @@ function AppContent() {
              if (count < connectionThreshold) return false;
           }
           if (!visibleTypes.has(type)) return false;
+          
+          if (allowedIds) {
+              return allowedIds.has(id);
+          }
+
           const filter = typeFilters[type] !== undefined ? typeFilters[type] : globalFilter;
           return matchFilter(name, filter);
       };
