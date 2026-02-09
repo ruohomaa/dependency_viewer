@@ -26,8 +26,8 @@ dist
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+*.sw?ß
 
-dependencies.db
+dependencies*
 client/package-lock.json
 package-lock.json

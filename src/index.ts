@@ -8,6 +8,16 @@ import { startServer } from './server';
 
 const program = new Command();
 
+function getDatabasePath(targetOrg?: string): string {
+  if (process.env.DATABASE_PATH) {
+    return process.env.DATABASE_PATH;
+  }
+  if (targetOrg) {
+    const sanitizedOrg = targetOrg.replace(/[^a-zA-Z0-9.@_-]/g, '_');
+    return `dependencies_${sanitizedOrg}.db`;
+  }
+  return 'dependencies.db';
+}
 
 program
   .name('dep-viewer')
@@ -20,9 +30,10 @@ program.on('option:db', (dbPath) => {
 });
 
 program.command('clean')
-  .description('Delete the entire local SQLite database')
-  .action(() => {
-    const dbPath = process.env.DATABASE_PATH || 'dependencies.db';
+  .description('Delete the local SQLite database')
+  .option('-o, --target-org <org>', 'Target Salesforce Org (username or alias) to identify the database')
+  .action((options) => {
+    const dbPath = getDatabasePath(options.targetOrg);
     if (fs.existsSync(dbPath)) {
       try {
         fs.unlinkSync(dbPath);
@@ -41,7 +52,9 @@ program.command('sync')
   .option('-c, --clean', 'Delete the existing database before syncing')
   .action(async (options) => {
     try {
-      const dbPath = process.env.DATABASE_PATH || 'dependencies.db';
+      const dbPath = getDatabasePath(options.targetOrg);
+      // Ensure db module uses this path
+      process.env.DATABASE_PATH = dbPath;
       
       if (options.clean) {
          if (fs.existsSync(dbPath)) {
@@ -51,6 +64,7 @@ program.command('sync')
       }
 
       console.log(`\n=== Starting Sync for org: ${options.targetOrg} ===`);
+      console.log(`Database: ${dbPath}`);
       
       initDb();
       if (!options.clean) {
@@ -123,8 +137,11 @@ program.command('sync')
 program.command('serve')
   .description('Start the web server')
   .option('-p, --port <port>', 'Port to run on', '3000')
-  .option('-o, --target-org <org>', 'Target Salesforce Org for live dependency fetching')
+  .option('-o, --target-org <org>', 'Target Salesforce Org to select database')
   .action((options) => {
+    const dbPath = getDatabasePath(options.targetOrg);
+    process.env.DATABASE_PATH = dbPath;
+    console.log(`Serving database: ${dbPath}`);
     startServer(parseInt(options.port), options.targetOrg);
   });
 
