@@ -5,8 +5,10 @@ A tool to visualize Salesforce Metadata Dependencies using a local SQLite databa
 ## Features
 
 - **CLI Tool**: Fetch metadata dependencies from your Salesforce org using the Tooling API.
-- **Local Database**: Stores dependencies in a local SQLite file (`dependencies.db`) for offline access.
-- **Web Visualization**: Interactive graph visualization using ReactFlow.
+- **Local Database**: Stores dependencies in a local SQLite file (`dependencies_<org>.db`) for offline access.
+- **Code Stats**: Captures Apex Class/Trigger size and code coverage.
+- **Web Visualization**: Interactive graph visualization using ReactFlow with grouping, search, and filtering.
+- **Quick Access**: Open components directly in Salesforce from the graph.
 
 ## Installation
 
@@ -39,7 +41,7 @@ To clear the database before syncing (fresh start):
 
 To just delete the database:
 ```bash
-./dep-viewer clean
+./dep-viewer clean -o <target-org-alias>
 ```
 
 ### 2. View Dependencies
