@@ -9,11 +9,18 @@ const dagreGraph = new dagre.graphlib.Graph();
 dagreGraph.setDefaultEdgeLabel(() => ({}));
 
 const DataNode = ({ data, selected }: any) => {
+  let borderColor = `2px solid hsla(${data.hue}, 70%, 40%, 1)`;
+  if (data.coverage !== undefined && data.coverage !== null) {
+      if (data.coverage < 75) borderColor = '3px solid #e53935';
+      else if (data.coverage < 85) borderColor = '3px solid #fb8c00';
+      else borderColor = '3px solid #43a047';
+  }
+
   return (
      <div style={{
          width: '100%', height: '100%', borderRadius: '50%',
          backgroundColor: `hsla(${data.hue}, 70%, 70%, 1)`,
-         border: selected ? '3px solid #333' : `2px solid hsla(${data.hue}, 70%, 40%, 1)`,
+         border: selected ? '3px solid #333' : borderColor,
          display: 'flex', alignItems: 'center', justifyContent: 'center',
          boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
      }}>
@@ -296,6 +303,9 @@ function AppContent() {
   const [showOrphansOnly, setShowOrphansOnly] = useState(false);
   const [showHighlyConnected, setShowHighlyConnected] = useState(false);
   const [connectionThreshold, setConnectionThreshold] = useState(5);
+  const [showCoverageFilter, setShowCoverageFilter] = useState(false);
+  const [minCoverage, setMinCoverage] = useState(0);
+  const [maxCoverage, setMaxCoverage] = useState(100);
 
   useEffect(() => {
      // Re-layout when effective nodes/edges change
@@ -517,6 +527,39 @@ function AppContent() {
      }
   }, [selectedItems, fetchedResults]);
 
+  const availableTypesForLegend = useMemo(() => {
+    // If no complex non-type filters are active, return all
+    if (!showCoverageFilter) return allTypes;
+    
+    // Otherwise, calculate types that "Survive" the filters (ignoring the type filter itself)
+    const available = new Set<string>();
+    
+    rawData.forEach(d => {
+        const sType = getEffectiveType(d.metadataComponentType, d.metadataComponentName);
+        let sValid = true;
+        
+        if (showCoverageFilter) {
+            const c = d.metadataComponentCoverage;
+             if (typeof c !== 'number' || c < minCoverage || c > maxCoverage) sValid = false;
+        }
+        
+        // If the item passes coverage, its type is "available" to be toggled
+        if (sValid) available.add(sType);
+
+        if (d.refMetadataComponentId) {
+            const tType = getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentComponentName || d.refMetadataComponentName);
+            let tValid = true;
+             if (showCoverageFilter) {
+                const c = d.refMetadataComponentCoverage;
+                if (typeof c !== 'number' || c < minCoverage || c > maxCoverage) tValid = false;
+            }
+            if (tValid) available.add(tType);
+        }
+    });
+    
+    return Array.from(available).sort();
+  }, [allTypes, rawData, showCoverageFilter, minCoverage, maxCoverage]);
+
   useEffect(() => {
     if (rawData.length === 0) {
         setNodes([]);
@@ -613,7 +656,12 @@ function AppContent() {
         ? getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentComponentName || d.refMetadataComponentName)
         : null;
       
-      const isVisible = (type: string, name: string, id: string) => {
+      const isVisible = (type: string, name: string, id: string, coverage?: number) => {
+          if (showCoverageFilter) {
+             if (typeof coverage !== 'number') return false; 
+             if (coverage < minCoverage || coverage > maxCoverage) return false;
+          }
+
           if (showOrphansOnly && hasIncoming.has(id)) return false;
           if (showHighlyConnected) {
              const count = connectionCounts.get(id) || 0;
@@ -629,8 +677,8 @@ function AppContent() {
           return matchFilter(name, filter);
       };
 
-      const isSourceVisible = d.metadataComponentId ? isVisible(sourceType, d.metadataComponentName, d.metadataComponentId) : false;
-      const isTargetVisible = targetType && d.refMetadataComponentId ? isVisible(targetType, d.refMetadataComponentComponentName || d.refMetadataComponentName, d.refMetadataComponentId) : false;
+      const isSourceVisible = d.metadataComponentId ? isVisible(sourceType, d.metadataComponentName, d.metadataComponentId, d.metadataComponentCoverage) : false;
+      const isTargetVisible = targetType && d.refMetadataComponentId ? isVisible(targetType, d.refMetadataComponentComponentName || d.refMetadataComponentName, d.refMetadataComponentId, d.refMetadataComponentCoverage) : false;
 
       // Create Source Node
       if (isSourceVisible && d.metadataComponentId && !newNodes.has(d.metadataComponentId)) {
@@ -643,7 +691,8 @@ function AppContent() {
               label: d.metadataComponentName, 
               type: sourceType, 
               hue: getColorForType(sourceType),
-              showLabel: showLabels 
+              showLabel: showLabels,
+              coverage: d.metadataComponentCoverage
           },
           style: { width: size, height: size },
         });
@@ -660,7 +709,8 @@ function AppContent() {
               label: d.refMetadataComponentComponentName || d.refMetadataComponentName, 
               type: targetType!, 
               hue: getColorForType(targetType!),
-              showLabel: showLabels 
+              showLabel: showLabels,
+              coverage: d.refMetadataComponentCoverage 
           },
           style: { width: size, height: size },
         });
@@ -690,7 +740,7 @@ function AppContent() {
     if (layoutedNodes.length > 0) {
        setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
     }
-  }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly, showHighlyConnected, connectionThreshold]); // Removed showLabels, handled separately
+  }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly, showHighlyConnected, connectionThreshold, showCoverageFilter, minCoverage, maxCoverage]); // Removed showLabels, handled separately
 
   // Separate effect to update labels without re-layout
   useEffect(() => {
@@ -718,7 +768,7 @@ function AppContent() {
 
   const toggleAll = (checked: boolean) => {
     if (checked) {
-      setVisibleTypes(new Set(allTypes));
+      setVisibleTypes(new Set(availableTypesForLegend));
     } else {
       setVisibleTypes(new Set());
     }
@@ -931,6 +981,49 @@ function AppContent() {
             </label>
           </div>
           <div style={{ marginBottom: '5px', borderBottom: '1px solid #eee', paddingBottom: '5px' }}>
+             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginBottom: '4px' }}>
+                <input 
+                    type="checkbox" 
+                    checked={showCoverageFilter} 
+                    onChange={(e) => setShowCoverageFilter(e.target.checked)}
+                    style={{ marginRight: '6px' }}
+                />
+                Filter by Coverage
+             </label>
+             
+             {showCoverageFilter && (
+                <div style={{ paddingLeft: '20px', marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <input 
+                        type="number" min="0" max="100" 
+                        value={minCoverage} 
+                        onChange={(e) => setMinCoverage(Number(e.target.value))}
+                        style={{ width: '40px', padding: '2px', fontSize: '11px', border: '1px solid #ccc' }}
+                    />
+                    <span style={{ fontSize: '11px' }}>% - </span>
+                    <input 
+                        type="number" min="0" max="100" 
+                        value={maxCoverage} 
+                        onChange={(e) => setMaxCoverage(Number(e.target.value))}
+                        style={{ width: '40px', padding: '2px', fontSize: '11px', border: '1px solid #ccc' }}
+                    />
+                    <span style={{ fontSize: '11px' }}>%</span>
+                </div>
+             )}
+
+             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2px', fontSize: '11px' }}>
+                <div style={{ width: '12px', height: '12px', border: '3px solid #43a047', borderRadius: '50%', marginRight: '6px' }}></div>
+                <span>≥ 85%</span>
+             </div>
+             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2px', fontSize: '11px' }}>
+                <div style={{ width: '12px', height: '12px', border: '3px solid #fb8c00', borderRadius: '50%', marginRight: '6px' }}></div>
+                <span>75% - 84%</span>
+             </div>
+             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2px', fontSize: '11px' }}>
+                <div style={{ width: '12px', height: '12px', border: '3px solid #e53935', borderRadius: '50%', marginRight: '6px' }}></div>
+                <span>&lt; 75%</span>
+             </div>
+          </div>
+          <div style={{ marginBottom: '5px', borderBottom: '1px solid #eee', paddingBottom: '5px' }}>
              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1, fontWeight: '500', marginBottom: showHighlyConnected ? '4px' : '0' }}>
                 <input 
                     type="checkbox" 
@@ -957,19 +1050,20 @@ function AppContent() {
           <div className="legend-item" style={{ fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '5px', marginBottom: '5px' }}>
             <input 
               type="checkbox" 
-              checked={allTypes.length > 0 && visibleTypes.size === allTypes.length}
-              disabled={allTypes.length === 0}
+              checked={availableTypesForLegend.length > 0 && availableTypesForLegend.every(t => visibleTypes.has(t))}
+              disabled={availableTypesForLegend.length === 0}
               ref={input => {
                 if (input) {
-                  input.indeterminate = visibleTypes.size > 0 && visibleTypes.size < allTypes.length;
+                  const visibleCount = availableTypesForLegend.filter(t => visibleTypes.has(t)).length;
+                  input.indeterminate = visibleCount > 0 && visibleCount < availableTypesForLegend.length;
                 }
               }}
               onChange={(e) => toggleAll(e.target.checked)}
             />
             <span>All Metadata Types</span>
           </div>
-          {allTypes.length === 0 && <div style={{padding: '5px', color: '#666'}}>No data loaded</div>}
-          {allTypes.map((type) => (
+          {availableTypesForLegend.length === 0 && <div style={{padding: '5px', color: '#666'}}>No matching data</div>}
+          {availableTypesForLegend.map((type) => (
             <div key={type} className="legend-item" style={{ justifyContent: 'space-between' }}>
                 <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: 1 }}>
                   <input
