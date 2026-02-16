@@ -5,6 +5,19 @@ import * as d3 from 'd3-force';
 import 'reactflow/dist/style.css';
 import './App.css';
 
+// Performance threshold: skip force simulation for graphs above this size
+const FORCE_SIM_NODE_LIMIT = 500;
+
+// Custom hook for debounced value
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 const dagreGraph = new dagre.graphlib.Graph();
 dagreGraph.setDefaultEdgeLabel(() => ({}));
 
@@ -307,15 +320,34 @@ function AppContent() {
   const [minCoverage, setMinCoverage] = useState(0);
   const [maxCoverage, setMaxCoverage] = useState(100);
 
+  // Debounce filter values so layout doesn't recompute on every keystroke
+  const debouncedTypeFilters = useDebouncedValue(typeFilters, 300);
+  const debouncedGlobalFilter = useDebouncedValue(globalFilter, 300);
+  const debouncedMinCoverage = useDebouncedValue(minCoverage, 300);
+  const debouncedMaxCoverage = useDebouncedValue(maxCoverage, 300);
+
+  const rafRef = useRef<number | null>(null);
+
   useEffect(() => {
      // Re-layout when effective nodes/edges change
      if (nodes.length > 0) {
+        // Skip force simulation for large graphs to prevent browser hang
+        if (nodes.length > FORCE_SIM_NODE_LIMIT) {
+            // Just run static layout (already done in the rawData effect)
+            // and skip the expensive force simulation
+            return;
+        }
+
         // Run static layout first
         const { nodes: layoutNodes } = getGroupedLayoutElements(nodes, edges);
 
         // Initialize Force Simulation
         if (simulationRef.current) {
             simulationRef.current.stop();
+        }
+        if (rafRef.current) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
         }
 
         const simNodes = layoutNodes.map(n => ({ 
@@ -326,6 +358,9 @@ function AppContent() {
             initialX: n.position.x,
             initialY: n.position.y
         }));
+        
+        // Build a Map for O(1) lookup instead of O(n) Array.find
+        const simNodeMap = new Map(simNodes.map(sn => [sn.id, sn]));
         
         const simLinks = edges.map(e => ({ ...e, source: e.source, target: e.target }));
 
@@ -338,52 +373,81 @@ function AppContent() {
             .force("y", d3.forceY((d: any) => d.initialY).strength(0.05))
             .alphaDecay(0.05);
 
+        // Throttle React updates using requestAnimationFrame instead of updating on every tick
+        let needsUpdate = false;
         simulation.on("tick", () => {
-             setNodes(prev => prev.map(n => {
-                 const simNode = simNodes.find(sn => sn.id === n.id);
-                 if (simNode) {
-                     return { ...n, position: { x: simNode.x, y: simNode.y } };
-                 }
-                 return n;
-             }));
+            needsUpdate = true;
         });
+
+        const updateLoop = () => {
+            if (needsUpdate) {
+                needsUpdate = false;
+                setNodes(prev => prev.map(n => {
+                    const simNode = simNodeMap.get(n.id);
+                    if (simNode) {
+                        return { ...n, position: { x: simNode.x, y: simNode.y } };
+                    }
+                    return n;
+                }));
+            }
+            rafRef.current = requestAnimationFrame(updateLoop);
+        };
+        rafRef.current = requestAnimationFrame(updateLoop);
 
         simulationRef.current = simulation;
 
         return () => {
             if (simulationRef.current) simulationRef.current.stop();
+            if (rafRef.current) {
+                cancelAnimationFrame(rafRef.current);
+                rafRef.current = null;
+            }
         };
      }
   }, [nodes.length, edges.length]); // Only re-run if count changes, not on positions
 
+  // Helper to find sim node by id using O(1) Map lookup
+  const findSimNode = useCallback((nodeId: string) => {
+      if (!simulationRef.current) return null;
+      const nodes = simulationRef.current.nodes();
+      // Build index on first access per drag session, or use linear scan for small sets
+      // For simplicity and correctness, index is rebuilt — drag events are infrequent
+      if (!simulationRef.current._nodeMap) {
+          simulationRef.current._nodeMap = new Map(nodes.map((d: any) => [d.id, d]));
+      }
+      return simulationRef.current._nodeMap.get(nodeId) || null;
+  }, []);
+
   const onNodeDragStart = useCallback((_: any, node: Node) => {
       if (!simulationRef.current) return;
+      // Invalidate cached map on drag start so it's rebuilt fresh
+      simulationRef.current._nodeMap = null;
       simulationRef.current.alphaTarget(0.3).restart();
-      const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
+      const n = findSimNode(node.id);
       if (n) {
           n.fx = node.position.x;
           n.fy = node.position.y;
       }
-  }, []);
+  }, [findSimNode]);
 
   const onNodeDrag = useCallback((_: any, node: Node) => {
       if (!simulationRef.current) return;
-      const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
+      const n = findSimNode(node.id);
       if (n) {
           n.fx = node.position.x;
           n.fy = node.position.y;
       }
-  }, []);
+  }, [findSimNode]);
 
   const onNodeDragStop = useCallback((_: any, node: Node) => {
       if (!simulationRef.current) return;
       if (!(_ as any).active) simulationRef.current.alphaTarget(0);
-      const n = simulationRef.current.nodes().find((d: any) => d.id === node.id);
+      const n = findSimNode(node.id);
       if (n) {
           n.fx = node.position.x;
           n.fy = node.position.y;
       }
-  }, []);
+  }, [findSimNode]);
 
   // Derive all unique types from raw data
   const allTypes = useMemo(() => {
@@ -567,6 +631,12 @@ function AppContent() {
         return;
     }
 
+    // Use debounced filter values for the layout computation
+    const typeFilters = debouncedTypeFilters;
+    const globalFilter = debouncedGlobalFilter;
+    const minCoverage = debouncedMinCoverage;
+    const maxCoverage = debouncedMaxCoverage;
+
     const newNodes = new Map<string, Node>();
     const newEdges: Edge[] = [];
     
@@ -740,7 +810,7 @@ function AppContent() {
     if (layoutedNodes.length > 0) {
        setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
     }
-  }, [rawData, visibleTypes, typeFilters, globalFilter, showOrphansOnly, showHighlyConnected, connectionThreshold, showCoverageFilter, minCoverage, maxCoverage]); // Removed showLabels, handled separately
+  }, [rawData, visibleTypes, debouncedTypeFilters, debouncedGlobalFilter, showOrphansOnly, showHighlyConnected, connectionThreshold, showCoverageFilter, debouncedMinCoverage, debouncedMaxCoverage]); // Removed showLabels, handled separately
 
   // Separate effect to update labels without re-layout
   useEffect(() => {
