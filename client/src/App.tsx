@@ -8,6 +8,17 @@ import './App.css';
 // Performance threshold: skip force simulation for graphs above this size
 const FORCE_SIM_NODE_LIMIT = 500;
 
+function formatTimeAgo(isoString: string): string {
+  const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 // Custom hook for debounced value
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -313,6 +324,7 @@ function AppContent() {
   const [fetchedResults, setFetchedResults] = useState<Map<string, any[]>>(new Map());
   const [useLocalDb, setUseLocalDb] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
+  const [lastSync, setLastSync] = useState<string | null>(null);
   const [showOrphansOnly, setShowOrphansOnly] = useState(false);
   const [showHighlyConnected, setShowHighlyConnected] = useState(false);
   const [connectionThreshold, setConnectionThreshold] = useState(5);
@@ -458,6 +470,17 @@ function AppContent() {
     });
     return Array.from(types).sort();
   }, [rawData]);
+
+  // Fetch last sync timestamp
+  useEffect(() => {
+    const fetchSyncStatus = () => {
+      const apiUrl = import.meta.env.DEV ? 'http://localhost:3000/api/sync-status' : '/api/sync-status';
+      fetch(apiUrl).then(r => r.json()).then(data => setLastSync(data.lastSync)).catch(() => {});
+    };
+    fetchSyncStatus();
+    const interval = setInterval(fetchSyncStatus, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Handle Search
   useEffect(() => {
@@ -918,7 +941,11 @@ function AppContent() {
                  }}>
                      Load All (DB)
                  </button>
-            </div>            
+            </div>
+            <div style={{ fontSize: '11px', color: '#888', marginBottom: '8px', textAlign: 'center' }}
+              title={lastSync ? new Date(lastSync).toLocaleString() : undefined}>
+              Local DB last synced: {lastSync ? formatTimeAgo(lastSync) : 'never'}
+            </div>
             <div style={{ marginBottom: '10px' }}>
                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                    <input 

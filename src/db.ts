@@ -33,6 +33,13 @@ export function initDb() {
   
   db.exec(`CREATE INDEX IF NOT EXISTS idx_deps_source ON metadata_dependencies(sourceId);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_deps_target ON metadata_dependencies(targetId);`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_info (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
 }
 
 export function insertComponents(components: { id: string, name: string, type: string }[]) {
@@ -147,6 +154,15 @@ export function getAllDependencies() {
     LEFT JOIN metadata_components t ON d.targetId = t.id
   `;
   return getDb().prepare(sql).all();
+}
+
+export function setSyncTimestamp() {
+  getDb().prepare(`INSERT OR REPLACE INTO sync_info (key, value) VALUES ('last_sync', ?)`).run(new Date().toISOString());
+}
+
+export function getSyncTimestamp(): string | null {
+  const row = getDb().prepare(`SELECT value FROM sync_info WHERE key = 'last_sync'`).get() as { value: string } | undefined;
+  return row?.value ?? null;
 }
 
 export function getDependenciesForComponent(id: string) {

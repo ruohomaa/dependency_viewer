@@ -2,7 +2,7 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import open from 'open';
-import { getAllDependencies, getComponents, initDb, searchComponents } from './db';
+import { getAllDependencies, getComponents, getSyncTimestamp, initDb, searchComponents } from './db';
 import { fetchDependenciesForId, openInSalesforce } from './salesforce';
 
 export function startServer(port: number, targetOrg?: string) {
@@ -12,6 +12,15 @@ export function startServer(port: number, targetOrg?: string) {
 
   // Initialize DB safely
   initDb();
+
+  app.get('/api/sync-status', (req, res) => {
+    try {
+      const lastSync = getSyncTimestamp();
+      res.json({ lastSync });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get('/api/dependencies', (req, res) => {
     try {

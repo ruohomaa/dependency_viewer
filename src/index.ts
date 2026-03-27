@@ -3,7 +3,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import { Command } from 'commander';
 import { fetchAllMetadata, fetchApexStats, fetchAllDependencies } from './salesforce';
-import { initDb, clearDependencies, insertComponents, updateComponentStats, insertDependencyEdges } from './db';
+import { initDb, clearDependencies, insertComponents, updateComponentStats, insertDependencyEdges, setSyncTimestamp } from './db';
 import { startServer } from './server';
 
 const program = new Command();
@@ -125,6 +125,7 @@ program.command('sync')
       console.log(`      Saving ${edges.length} dependency edges...`);
       insertDependencyEdges(edges);
 
+      setSyncTimestamp();
       console.log(`\nDone! Sync complete.`);
     } catch (err: any) {
       console.error('Error:', err.message);
