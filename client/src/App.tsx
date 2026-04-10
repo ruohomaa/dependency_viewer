@@ -611,6 +611,16 @@ function AppContent() {
             }
         });
         setRawData(nextRawData);
+
+        // Ensure types from fetched results are visible
+        setVisibleTypes(prevTypes => {
+            const nextTypes = new Set(prevTypes);
+            nextRawData.forEach((d: any) => {
+                if (d.metadataComponentType) nextTypes.add(getEffectiveType(d.metadataComponentType, d.metadataComponentName));
+                if (d.refMetadataComponentType) nextTypes.add(getEffectiveType(d.refMetadataComponentType, d.refMetadataComponentName || d.refMetadataComponentComponentName));
+            });
+            return nextTypes;
+        });
      }
   }, [selectedItems, fetchedResults]);
 
